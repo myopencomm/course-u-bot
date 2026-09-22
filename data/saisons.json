@@ -1,0 +1,63 @@
+{
+  "_doc": "Calendrier des fruits et légumes de saison en France métropolitaine. Index = numéro du mois. Les listes sont ordonnées du plus courant au plus spécifique.",
+  "1": {
+    "nom": "janvier",
+    "fruits": ["pomme", "poire", "orange", "clémentine", "kiwi", "pamplemousse", "citron", "banane"],
+    "legumes": ["poireau", "carotte", "chou", "pomme de terre", "endive", "potiron", "navet", "céleri", "betterave", "oignon", "épinard"]
+  },
+  "2": {
+    "nom": "février",
+    "fruits": ["pomme", "poire", "orange", "clémentine", "kiwi", "pamplemousse", "citron", "banane"],
+    "legumes": ["poireau", "carotte", "chou", "pomme de terre", "endive", "navet", "céleri", "betterave", "topinambour", "épinard"]
+  },
+  "3": {
+    "nom": "mars",
+    "fruits": ["pomme", "poire", "orange", "kiwi", "citron", "banane"],
+    "legumes": ["poireau", "carotte", "chou", "pomme de terre", "endive", "épinard", "navet", "radis", "betterave", "oignon"]
+  },
+  "4": {
+    "nom": "avril",
+    "fruits": ["pomme", "poire", "kiwi", "citron", "banane", "fraise"],
+    "legumes": ["asperge", "radis", "épinard", "carotte", "poireau", "salade", "navet", "chou-fleur", "artichaut", "pomme de terre"]
+  },
+  "5": {
+    "nom": "mai",
+    "fruits": ["fraise", "cerise", "rhubarbe", "pomme", "banane"],
+    "legumes": ["asperge", "radis", "courgette", "petit pois", "salade", "épinard", "carotte", "concombre", "artichaut", "navet"]
+  },
+  "6": {
+    "nom": "juin",
+    "fruits": ["fraise", "cerise", "abricot", "melon", "framboise", "groseille", "pêche"],
+    "legumes": ["courgette", "tomate", "concombre", "haricot vert", "petit pois", "radis", "salade", "aubergine", "poivron", "carotte"]
+  },
+  "7": {
+    "nom": "juillet",
+    "fruits": ["abricot", "pêche", "nectarine", "melon", "framboise", "cerise", "prune", "myrtille"],
+    "legumes": ["tomate", "courgette", "aubergine", "poivron", "haricot vert", "concombre", "salade", "maïs", "fenouil", "carotte"]
+  },
+  "8": {
+    "nom": "août",
+    "fruits": ["pêche", "nectarine", "melon", "prune", "figue", "mirabelle", "framboise", "mûre", "raisin"],
+    "legumes": ["tomate", "courgette", "aubergine", "poivron", "haricot vert", "concombre", "maïs", "fenouil", "brocoli", "carotte"]
+  },
+  "9": {
+    "nom": "septembre",
+    "fruits": ["raisin", "pomme", "poire", "prune", "figue", "mirabelle", "melon", "mûre", "noisette", "pêche"],
+    "legumes": ["courgette", "tomate", "aubergine", "poivron", "haricot vert", "brocoli", "chou-fleur", "carotte", "betterave", "fenouil", "poireau", "épinard", "potiron"]
+  },
+  "10": {
+    "nom": "octobre",
+    "fruits": ["raisin", "pomme", "poire", "figue", "noix", "noisette", "coing", "kiwi"],
+    "legumes": ["potiron", "courge", "poireau", "carotte", "chou", "brocoli", "chou-fleur", "betterave", "épinard", "champignon", "fenouil", "panais"]
+  },
+  "11": {
+    "nom": "novembre",
+    "fruits": ["pomme", "poire", "kiwi", "clémentine", "orange", "noix", "coing"],
+    "legumes": ["potiron", "courge", "poireau", "carotte", "chou", "endive", "betterave", "panais", "navet", "champignon", "épinard", "topinambour"]
+  },
+  "12": {
+    "nom": "décembre",
+    "fruits": ["pomme", "poire", "clémentine", "orange", "kiwi", "pamplemousse", "noix"],
+    "legumes": ["poireau", "carotte", "chou", "endive", "potiron", "courge", "navet", "betterave", "panais", "céleri", "topinambour"]
+  }
+}

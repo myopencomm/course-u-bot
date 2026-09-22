@@ -1,0 +1,17 @@
+{
+  "_doc": "Vocabulaire de votre foyer. Copiez ce fichier en « lexique.json ». Chaque entrée traduit une façon d'écrire qui vous est propre vers un produit précis. « itemid » épingle une référence exacte du catalogue (on le trouve dans l'URL produit : /p/nom-du-produit/<itemid>.html) ; laissez null pour laisser le bot chercher à partir de « vers ». Plus simple : utilisez « npm run alias -- add ».",
+  "entrees": {
+    "quick milk": {
+      "vers": "Lait UHT entier bio",
+      "itemid": null,
+      "libelle": null,
+      "ajoute": "2026-01-01"
+    },
+    "le chocolat des enfants": {
+      "vers": "Chocolat au lait tablette",
+      "itemid": null,
+      "libelle": null,
+      "ajoute": "2026-01-01"
+    }
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "name": "course-u-bot",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "setup": "node src/setup.js",
+    "prepare-cart": "node src/prepare_cart.js",
+    "verify-cart": "node src/verify_cart.js",
+    "answer": "node src/answer.js",
+    "alias": "node src/alias.js",
+    "sync-account": "node src/sync_account.js",
+    "build-prefs": "node src/migrate_history.js",
+    "login": "node src/login.js",
+    "empty-cart": "node src/empty_cart.js",
+    "check-privacy": "node src/check_privacy.js"
+  },
+  "dependencies": {
+    "dotenv": "^17.3.1",
+    "imapflow": "^2.0.5",
+    "playwright": "^1.47.0"
+  },
+  "description": "Transforme une note Apple en panier Super U (coursesu.com) — skill OpenClaw pilotable depuis Telegram",
+  "license": "MIT",
+  "main": "src/prepare_cart.js"
+}

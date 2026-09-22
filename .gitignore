@@ -1,0 +1,22 @@
+# ─── Identifiants — ne JAMAIS publier ────────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ─── Données personnelles ────────────────────────────────────────────────────
+# Historique d'achats, listes de courses, préférences apprises, codes utilisés :
+# tout cela décrit votre foyer. Seuls les fichiers d'exemple sont partagés.
+data/*
+!data/saisons.json
+!data/lexique.example.json
+!data/.gitkeep
+
+# Profil du navigateur : contient les cookies de session Super U
+.chrome-profile/
+*.chrome-profile/
+
+# ─── Divers ──────────────────────────────────────────────────────────────────
+node_modules/
+.DS_Store
+*.log
+tmp/
