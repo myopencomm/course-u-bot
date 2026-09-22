@@ -26,8 +26,9 @@ choses non évidentes que ce guide vous épargne.
 openclaw skills install git:https://github.com/VOTRE-COMPTE/course-u-bot --as course-u-bot
 ```
 
-Puis ouvrez le fichier `SKILL.md` installé et remplacez `INSTALL_DIR` par le
-chemin réel du programme, par exemple `~/Documents/course-u-bot`.
+Puis ouvrez le `SKILL.md` installé (dans `~/.openclaw/workspace/skills/course-u-bot/`)
+et remplacez `INSTALL_DIR` par le chemin réel du programme, par exemple
+`~/Documents/course-u-bot`.
 
 Vérifiez qu'il est reconnu :
 
