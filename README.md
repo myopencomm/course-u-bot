@@ -86,6 +86,7 @@ rien supposer.
 | `npm run build-prefs` | Reconstruit ce qu'il sait de vos habitudes |
 | `npm run empty-cart -- --confirm` | Vide le panier |
 | `npm run check-privacy` | Vérifie qu'aucune donnée perso ne part sur GitHub |
+| `npm test` | Vérifie que le programme tient debout, sans toucher au site |
 
 Ajoutez `--dry-run` à `prepare-cart` pour voir ce qu'il ferait sans rien toucher.
 

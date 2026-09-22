@@ -77,6 +77,21 @@ function config() {
   };
 }
 
+// Consigne envoyée au modèle. Volontairement explicite sur le format attendu :
+// tous les CLI ne savent pas contraindre une sortie structurée.
+const CONSIGNE = [
+  'Tu assistes un bot de courses francais sur coursesu.com.',
+  'Reponds UNIQUEMENT par des objets JSON, un par ligne, sans texte autour:',
+  '{"ligne":<n>,"itemid":"<id>"|null,"confiance":<0..1>,"raison":"<12 mots max>"}',
+  'Mets itemid a null si un humain doit vraiment trancher.',
+  'Regles de choix:',
+  '- privilegier le produit brut sur le derive (le fruit plutot que le jus, le sirop ou la conserve);',
+  '- respecter les qualificatifs: vert != jaune, rouge != blanc, bio si demande;',
+  '- un vinaigre/huile "nature" prime sur une version aromatisee, sauf demande contraire;',
+  '- a qualite egale, preferer ce qui est deja achete par l utilisateur;',
+  '- deux libelles identiques sont un doublon catalogue: en choisir un, ne pas hesiter pour autant.',
+].join('\n');
+
 /** Extrait les objets JSON d'une reponse, qu'elle soit en tableau ou ligne a ligne. */
 function extraireObjets(texte) {
   const out = [];

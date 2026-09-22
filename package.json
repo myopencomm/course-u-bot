@@ -12,7 +12,8 @@
     "build-prefs": "node src/migrate_history.js",
     "login": "node src/login.js",
     "empty-cart": "node src/empty_cart.js",
-    "check-privacy": "node src/check_privacy.js"
+    "check-privacy": "node src/check_privacy.js",
+    "test": "node src/smoke_test.js"
   },
   "dependencies": {
     "dotenv": "^17.3.1",
