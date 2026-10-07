@@ -24,7 +24,7 @@ import { spawn } from 'child_process';
 import path from 'path';
 import process from 'process';
 import { ROOT, LOGIN_URL, STORE_URL } from './paths.js';
-import { waitForCode, clearRelay, marquerConsomme, supprimerMail, nettoyerMailsConsommes } from './otp.js';
+import { waitForCode, clearRelay, marquerConsomme, supprimerMail, nettoyerMailsConsommes, debutConnexion, finConnexion } from './otp.js';
 
 const CDP_PORT = Number(process.env.CHROME_CDP_PORT || 9222);
 // Profil historique du bot : son ancienneté aide le Turnstile à passer.
@@ -280,39 +280,45 @@ export async function ensureLoggedIn(page, { notify } = {}) {
 
   const loginStartedAt = new Date();
   clearRelay(); // tout code antérieur à cet instant est périmé
-  await continueBtn.click();
-  await page.waitForTimeout(3500);
+  // Le code qui va arriver est celui du bot : le relais Telegram ne doit pas
+  // l'envoyer au reste du foyer.
+  debutConnexion();
+  try {
+    await continueBtn.click();
+    await page.waitForTimeout(3500);
 
-  const step = await findCodeStep(page);
-  if (step) {
-    console.log(`[SESSION] Code de vérification demandé (${step.kind}).`);
-    const { code, source, ref } = await waitForCode({
-      since: loginStartedAt,
-      // 5 min : mesuré le 2026-09-21, un code est arrivé APRÈS la fenêtre de
-      // 180 s. La livraison du mail Super U dépasse parfois trois minutes, et
-      // un échec ici fait repartir toute la connexion pour rien.
-      timeoutMs: 300000,
-      onWaiting: async ({ gmailUsable }) => {
-        await say(gmailUsable
-          ? '🔐 Super U demande un code de vérification. Je le lis dans Gmail, patiente ~15s.'
-          : '🔐 Super U demande un code de vérification et Gmail est indisponible. Poste le code ici.');
-      },
-    });
-    console.log(`[SESSION] Code reçu via ${source}.`);
-    // Marqué avant la saisie : même si la validation échoue, ce code a été
-    // présenté au site et ne doit plus être proposé à la tentative suivante.
-    marquerConsomme(code);
-    // Puis on supprime le mail sans attendre. une autre personne du foyer se connecte au même compte
-    // depuis son poste et reçoit son code par Zapier, qui surveille cette boîte
-    // et repère mal les empilements : un mail du bot laissé en place peut lui
-    // faire relayer un code déjà consommé.
-    if (ref) {
-      const efface = await supprimerMail(ref);
-      console.log(efface ? '[SESSION] Mail du code supprimé.' : '[SESSION] Mail du code non supprimé.');
+    const step = await findCodeStep(page);
+    if (step) {
+      console.log(`[SESSION] Code de vérification demandé (${step.kind}).`);
+      const { code, source, ref } = await waitForCode({
+        since: loginStartedAt,
+        // 5 min : mesuré le 2026-09-21, un code est arrivé APRÈS la fenêtre de
+        // 180 s. La livraison du mail Super U dépasse parfois trois minutes, et
+        // un échec ici fait repartir toute la connexion pour rien.
+        timeoutMs: 300000,
+        onWaiting: async ({ gmailUsable }) => {
+          await say(gmailUsable
+            ? '🔐 Super U demande un code de vérification. Je le lis dans Gmail, patiente ~15s.'
+            : '🔐 Super U demande un code de vérification et Gmail est indisponible. Poste le code ici.');
+        },
+      });
+      console.log(`[SESSION] Code reçu via ${source}.`);
+      // Marqué avant la saisie : même si la validation échoue, ce code a été
+      // présenté au site et ne doit plus être proposé à la tentative suivante.
+      marquerConsomme(code);
+      // Puis on supprime le mail sans attendre : une autre personne du foyer se
+      // connecte au même compte depuis son poste, et un mail du bot laissé en
+      // place pourrait lui faire prendre un code déjà consommé.
+      if (ref) {
+        const efface = await supprimerMail(ref);
+        console.log(efface ? '[SESSION] Mail du code supprimé.' : '[SESSION] Mail du code non supprimé.');
+      }
+      await fillCode(page, step, code);
+      clearRelay();
+      await page.waitForTimeout(4000);
     }
-    await fillCode(page, step, code);
-    clearRelay();
-    await page.waitForTimeout(4000);
+  } finally {
+    finConnexion();
   }
 
   await page.goto(STORE_URL, { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => {});
@@ -324,7 +330,7 @@ export async function ensureLoggedIn(page, { notify } = {}) {
   console.log(`[SESSION] Connecté (magasin ${ctx.storeName || ctx.storeId || '?'}, ${ctx.orderCount || '?'} commandes).`);
 
   // Dernier filet : on s'assure qu'aucun mail de code déjà consommé ne traîne
-  // dans la boîte surveillée par Zapier, pour ne pas fausser la connexion d'un autre membre du foyer.
+  // dans la boîte, pour ne pas fausser la connexion d'un autre membre du foyer.
   const balayes = await nettoyerMailsConsommes();
   if (balayes) console.log(`[SESSION] ${balayes} mail(s) de code périmé(s) mis à la corbeille.`);
 

@@ -178,12 +178,57 @@ Pensez à repasser les logs en `info` une fois le problème réglé.
 
 ---
 
+## Relayer le code de connexion au reste du foyer
+
+Quand une autre personne du foyer se connecte au compte Super U depuis son
+ordinateur, pour relire le panier préparé par le bot par exemple, Super U envoie
+un code de vérification à l'adresse du compte. Si elle ne lit pas cette boîte,
+le relais lui poste le code dans le groupe :
+
+```text
+🔑 Code de connexion Super U : 12345678
+Reçu à 19:42, valable quelques minutes.
+```
+
+Le relais lit la boîte Gmail déjà configurée pour le bot (`GMAIL_USER`,
+`GMAIL_APP_PASSWORD`), sans supprimer ni déplacer aucun mail. Il se tait quand
+le bot est lui-même en train de se connecter : ce code-là est celui du bot.
+
+1. Dans `.env`, l'identifiant du groupe (il commence par « - ») et, si vous avez
+   plusieurs bots OpenClaw, celui qui est membre du groupe :
+
+   ```bash
+   RELAY_TELEGRAM_TARGET=-1001234567890
+   RELAY_TELEGRAM_ACCOUNT=courses
+   ```
+
+2. Essayez-le au premier plan, puis connectez-vous au site depuis un autre
+   ordinateur : le code doit arriver dans le groupe.
+
+   ```bash
+   npm run relay-codes
+   ```
+
+3. Pour qu'il tourne en permanence, copiez `docs/launchd/relay-codes.plist.example`
+   dans `~/Library/LaunchAgents/`, remplacez les chemins indiqués en tête du
+   fichier, puis :
+
+   ```bash
+   launchctl load ~/Library/LaunchAgents/com.course-u-bot.relay-codes.plist
+   ```
+
+   Le journal est dans `~/Library/Logs/course-u-bot-relay.log`.
+
+Toute personne du groupe voit le code : n'y invitez que le foyer.
+
+---
+
 ## Ce que Telegram ne permettra jamais
 
 **Un bot ne reçoit pas les messages émis par un autre bot**, ni les siens. C'est
 une règle de l'API, indépendante du mode privacy.
 
-Conséquence pratique : si vous faites relayer vos codes de connexion dans le
-groupe par une automatisation (Zapier, Make…), **votre bot OpenClaw ne les verra
-pas**. La lecture du code doit passer par la boîte mail, ce que fait ce
-programme. Les messages des humains, eux, passent sans problème.
+Conséquence pratique : un code posté dans le groupe par un autre bot (le relais
+ci-dessus, ou une automatisation comme Zapier ou Make) **n'est pas vu par votre
+bot OpenClaw**. Le bot lit donc son propre code dans la boîte mail. Les messages
+des humains, eux, passent sans problème.

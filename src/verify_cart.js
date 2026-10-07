@@ -14,12 +14,12 @@ import 'dotenv/config';
 import { BILAN_PATH } from './lib/paths.js';
 import { openBrowser, closeBrowser, ensureLoggedIn } from './lib/session.js';
 import { readCart } from './lib/cart.js';
-import { readShoppingList } from './lib/notes.js';
+import { readShoppingListFresh } from './lib/notes.js';
 import { relirePanier } from './lib/judge.js';
 import { sendTelegram } from './lib/telegram.js';
 
 async function main() {
-  const items = readShoppingList();
+  const { items } = await readShoppingListFresh();
   const { page } = await openBrowser();
   try {
     await ensureLoggedIn(page, { notify: sendTelegram });

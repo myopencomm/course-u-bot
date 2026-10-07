@@ -9,6 +9,7 @@
     "answer": "node src/answer.js",
     "alias": "node src/alias.js",
     "sync-account": "node src/sync_account.js",
+    "relay-codes": "node src/relay_codes.js",
     "build-prefs": "node src/migrate_history.js",
     "login": "node src/login.js",
     "empty-cart": "node src/empty_cart.js",

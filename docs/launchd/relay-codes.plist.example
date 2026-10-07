@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Lance le relais des codes Super U au démarrage de la session et le relance
+  s'il s'arrête. Remplacez INSTALL_DIR, NODE_BIN (sortie de `which node`) et
+  VOTRE_NOM, copiez dans ~/Library/LaunchAgents/ puis :
+    launchctl load ~/Library/LaunchAgents/com.course-u-bot.relay-codes.plist
+  Voir docs/TELEGRAM.md, « Relayer le code de connexion ».
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.course-u-bot.relay-codes</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>NODE_BIN</string>
+    <string>INSTALL_DIR/src/relay_codes.js</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>INSTALL_DIR</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <!-- Le CLI openclaw, qui envoie le message, doit trouver le même Node. -->
+    <key>PATH</key>
+    <string>NODE_DIR:/Users/VOTRE_NOM/.npm-global/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <!-- Relancé après une erreur (réseau, veille) ; pas s'il est non configuré. -->
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+  <key>ThrottleInterval</key>
+  <integer>30</integer>
+  <key>StandardOutPath</key>
+  <string>/Users/VOTRE_NOM/Library/Logs/course-u-bot-relay.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/VOTRE_NOM/Library/Logs/course-u-bot-relay.log</string>
+</dict>
+</plist>

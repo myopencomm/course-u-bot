@@ -10,14 +10,22 @@ import fs from 'fs';
 import 'dotenv/config';
 import { PREFS_PATH, BILAN_PATH, QUESTIONS_PATH, DATA_DIR } from './lib/paths.js';
 import { openBrowser, closeBrowser, ensureLoggedIn } from './lib/session.js';
-import { readShoppingList } from './lib/notes.js';
+import { readShoppingListFresh } from './lib/notes.js';
 import { search, rank, decide } from './lib/catalog.js';
-import { addFromSearch, readCart } from './lib/cart.js';
+import { addFromSearch, readCart, removeFromCart } from './lib/cart.js';
 import { sendTelegram } from './lib/telegram.js';
 import { similarity } from './lib/normalize.js';
 import { arbitrer, relirePanier } from './lib/judge.js';
 import { developper } from './lib/lexique.js';
 import path from 'path';
+
+/** Option de question, telle qu'enregistrée dans questions.v2.json. */
+function versOption(o) {
+  return {
+    itemid: o.itemid, name: o.name, brand: o.brand, price: o.price,
+    rating: o.rating, cat1: o.cat1, historyCount: o.historyCount, inCart: o.inCart,
+  };
+}
 
 function loadJson(p, fallback) {
   try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return fallback; }
@@ -64,14 +72,16 @@ function matchConnu(wanted, prefs) {
  */
 function expectedCategory(wanted, favorites, prefs) {
   let best = null;
+  // Le rayon d'une banane bio est celui d'une banane : l'exigence bio ne
+  // compte pas ici.
   for (const p of favorites) {
     if (!p.cat1) continue;
-    const s = similarity(wanted, p.name);
+    const s = similarity(wanted, p.name, { bio: false });
     if (!best || s > best.sim) best = { cat1: p.cat1, sim: s };
   }
   for (const p of Object.values(prefs.products || {})) {
     if (!p.cat1) continue;
-    const s = similarity(wanted, p.label);
+    const s = similarity(wanted, p.label, { bio: false });
     if (!best || s > best.sim) best = { cat1: p.cat1, sim: s };
   }
   return best && best.sim >= 0.5 ? best.cat1 : null;
@@ -88,7 +98,8 @@ async function main() {
     ? path.join(DATA_DIR, 'prochain_supermarche.txt')
     : null;
 
-  const items = readShoppingList(listFile ? { fromFile: listFile } : {});
+  const { items, modifiedAt: noteModifiee } = await readShoppingListFresh(listFile ? { fromFile: listFile } : {});
+  if (noteModifiee) console.log(`[NOTE] Dernière modification : ${noteModifiee.toLocaleString('fr-FR')}.`);
   if (!items.length) {
     console.log('Liste vide : rien à faire.');
     await sendTelegram('🛒 La section PROCHAIN SUPERMARCHÉ de la note est vide.');
@@ -183,10 +194,8 @@ async function main() {
             index: questions.length + 1,
             wanted: item.wanted,
             quantity: item.quantity,
-            options: decision.options.map((o) => ({
-              itemid: o.itemid, name: o.name, brand: o.brand, price: o.price,
-              rating: o.rating, cat1: o.cat1, historyCount: o.historyCount,
-            })),
+            expectedCat1,
+            options: decision.options.map(versOption),
           });
           console.log(`  ❓ ${item.wanted} : ${decision.options.length} options, question posée.`);
         } else {
@@ -245,7 +254,7 @@ async function main() {
     }
 
     // Relecture du panier : c'est elle qui fait foi, pas les clics.
-    const cart = dryRun
+    let cart = dryRun
       ? { source: 'simulation', amount: null, basketId: null, declaredCount: null, items: [] }
       : await readCart(page);
     const inCart = new Set(cart.items.map((i) => i.itemid));
@@ -266,9 +275,62 @@ async function main() {
     else if (revue.anomalies.length) revue.anomalies.forEach((a) => console.log(`  ⚠️  ${a}`));
     else console.log(`[RELECTURE] ${revue.verdict}${revue.erreur ? ' : ' + revue.erreur : ''}`);
 
+    // Correction : une anomalie qui vise une ligne ajoutée seule par le bot pendant
+    // ce run est défaite — l'article est retiré et la ligne repart en question.
+    // Avant, la relecture signalait le problème et le laissait au panier.
+    // Hors champ, volontairement : les références épinglées par le vocabulaire
+    // (choix explicite de l'utilisateur), les lignes de saison (elles ne posent
+    // jamais de question), et tout article déjà au panier avant le run — il a
+    // pu y être mis à la main.
+    const corrections = [];
+    if (!dryRun && revue.verdict === 'problemes') {
+      const vues = new Set();
+      for (const a of revue.details || []) {
+        const k = a.ligne - 1;
+        const line = bilan[k];
+        const item = items[k];
+        if (!line || !item || vues.has(k)) continue;
+        if (line.status !== 'added' || !line.pick) continue;
+        if (item.saison || String(line.reason).startsWith('référence épinglée')) continue;
+        if (line.pick.inCart) continue;
+        vues.add(k);
+
+        const retire = line.pick;
+        const r = await removeFromCart(page, retire.itemid, item.quantity || 1);
+        if (!r.ok) {
+          console.log(`  ⚠️  ${item.wanted} : retrait impossible (${r.reason}), laissé au panier.`);
+          continue;
+        }
+        const res = await search(page, item.wanted);
+        const options = rank(res.products, { wanted: item.wanted, prefs, expectedCat1: item.saison ? null : expectedCategory(item.wanted, favorites, prefs) })
+          .filter((c) => c.addable && c.itemid !== retire.itemid)
+          .slice(0, 3);
+        line.status = options.length ? 'question' : 'not_found';
+        line.pick = null;
+        line.reason = `retiré après relecture : ${a.probleme}`;
+        if (options.length) {
+          questions.push({
+            index: questions.length + 1,
+            wanted: item.wanted,
+            quantity: item.quantity,
+            options: options.map(versOption),
+          });
+        }
+        corrections.push(`${retire.name.slice(0, 46)} retiré — ${a.probleme}`);
+        console.log(`  🔧 ${item.wanted} : ${retire.name.slice(0, 46)} retiré, ${options.length ? 'question posée' : 'aucune autre option'}.`);
+      }
+      if (corrections.length) {
+        // Le panier a changé : le bilan doit décrire le panier réel.
+        cart = await readCart(page);
+        const corrigees = new Set([...vues].map((k) => k + 1));
+        revue.anomalies = (revue.details || []).filter((a) => !corrigees.has(a.ligne)).map((a) => a.probleme);
+        if (!revue.anomalies.length) revue.verdict = 'corrige';
+      }
+    }
+
     // En simulation on n'écrase pas le bilan du dernier vrai run.
     if (!dryRun) {
-      fs.writeFileSync(BILAN_PATH, JSON.stringify({ ranAt: new Date().toISOString(), cart, lines: bilan, arbitrage, revue }, null, 2));
+      fs.writeFileSync(BILAN_PATH, JSON.stringify({ ranAt: new Date().toISOString(), cart, lines: bilan, arbitrage, revue, corrections }, null, 2));
     }
     if (!dryRun) fs.writeFileSync(QUESTIONS_PATH, JSON.stringify(questions, null, 2));
 
@@ -279,10 +341,18 @@ async function main() {
 
     const nbPanier = cart.declaredCount ?? cart.items.length;
     let msg = `🛒 Panier préparé (${nbPanier} articles, ${cart.amount ?? '?'} €)\n`;
+    // L'heure de la note lue permet de voir d'un coup d'œil si un ajout de
+    // dernière minute a été pris en compte.
+    if (noteModifiee) {
+      msg += `📝 Liste lue telle que modifiée le ${noteModifiee.toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}\n`;
+    }
     msg += `✅ ${added} ajoutés · ❓ ${questions.length} questions · ⚠️ ${absent} à revérifier · ❌ ${notFound} introuvables`;
     if (errored) msg += ` · 💥 ${errored} en erreur`;
     if (journal.length) {
       msg += `\n\n📖 Traductions :\n` + journal.map((j) => `• ${j}`).join('\n');
+    }
+    if (corrections.length) {
+      msg += `\n\n🔧 Corrigé après relecture (retiré du panier, question ci-dessous) :\n` + corrections.map((c) => `• ${c}`).join('\n');
     }
     if (revue.verdict === 'problemes' && revue.anomalies.length) {
       msg += `\n\n🔎 Relecture :\n` + revue.anomalies.map((a) => `• ${a}`).join('\n');

@@ -23,13 +23,18 @@ function bin() {
   return 'openclaw';
 }
 
-export function sendTelegram(text, { target = TARGET } = {}) {
+export function sendTelegram(text, { target = TARGET, account = process.env.TELEGRAM_ACCOUNT || '' } = {}) {
   if (!target) {
     console.log('  (TELEGRAM_TARGET non défini — notification ignorée)');
     return Promise.resolve(false);
   }
+  // `--target=<id>` collé : l'identifiant d'un groupe commence par « - » et
+  // serait lu comme une option. `--account` choisit le bot OpenClaw membre du
+  // groupe quand il y en a plusieurs.
+  const args = ['message', 'send', '--channel', 'telegram', `--target=${target}`, '-m', text];
+  if (account) args.push('--account', String(account));
   return new Promise((resolve) => {
-    execFile(bin(), ['message', 'send', '--channel', 'telegram', '--target', String(target), '-m', text],
+    execFile(bin(), args,
       { timeout: 30000 },
       (err) => {
         if (err) console.log(`  ⚠️  Telegram indisponible : ${String(err.message).slice(0, 120)}`);

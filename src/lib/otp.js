@@ -4,12 +4,12 @@
 //   1. Gmail en IMAP  — instantané, autonome, personne dans la boucle.
 //   2. Fichier de dépannage — data/otp_inbox.txt, lu ici si l'IMAP casse.
 //
-// Attention : ce fichier ne peut PAS être alimenté automatiquement depuis le
-// groupe Telegram. Zapier y poste le code via un bot, or l'API Telegram ne livre
-// jamais à un bot les messages émis par un autre bot (ni les siens). Aucun bot
-// OpenClaw ne verra donc ce code. Le fichier se remplit à la main, ou par
-// l'agent quand l'utilisateur lui donne le code en message direct — un humain,
-// ses messages passent.
+// Le fichier se remplit à la main, ou par l'agent quand l'utilisateur lui donne
+// le code en message direct.
+//
+// Les codes demandés par quelqu'un d'autre du foyer (connexion depuis son
+// ordinateur) ne passent pas par ici : relay_codes.js les lui envoie sur
+// Telegram. Pendant une connexion du bot, connexionEnCours() lui dit de se taire.
 //
 // Le code n'est accepté que s'il est postérieur au début de la tentative de
 // connexion : sans ça, on rejouerait le code de la session précédente.
@@ -20,6 +20,7 @@ import path from 'path';
 import { OTP_INBOX_PATH, DATA_DIR } from './paths.js';
 
 const CONSUMED_PATH = path.join(DATA_DIR, 'otp_consumed.json');
+const LOGIN_LOCK_PATH = path.join(DATA_DIR, 'connexion_en_cours.json');
 
 // Le code Super U fait 8 chiffres (placeholder du site : "Exemple : 12345678").
 // On accepte 6 à 8 pour encaisser un changement de format, en privilégiant le
@@ -28,14 +29,14 @@ const CODE_RES = [/\b(\d{8})\b/, /\b(\d{7})\b/, /\b(\d{6})\b/];
 // Expéditeur réel du code, relevé sur un mail authentique :
 //   ne-pas-repondre@auth-mail.magasins-u.com
 //   sujet : "Connexion à votre compte U : votre code d'authentification"
-const SENDER_DOMAIN = 'magasins-u.com';
-const SENDER_HINTS = ['magasins-u', 'coursesu', 'systeme-u', 'compte u'];
-// Ordre de fouille. La corbeille est indispensable : le mail y est déplacé après
-// traitement par l'automatisation Zapier, souvent avant qu'on ait pu le lire.
+export const SENDER_DOMAIN = 'magasins-u.com';
+export const SENDER_HINTS = ['magasins-u', 'coursesu', 'systeme-u', 'compte u'];
+// Ordre de fouille. La corbeille est indispensable : un mail de code peut y
+// avoir été déplacé avant qu'on ait pu le lire.
 const MAILBOXES = ['INBOX', '[Gmail]/All Mail', '[Gmail]/Trash'];
 
 /** Extrait le code d'un texte, en privilégiant le format le plus long. */
-function extractCode(text) {
+export function extractCode(text) {
   if (!text) return null;
   for (const re of CODE_RES) {
     const m = text.match(re);
@@ -71,8 +72,8 @@ async function pollGmail({ since, user, pass, consommes = [] }) {
   try {
     const candidates = [];
 
-    // Le mail du code est supprimé après traitement par l'automatisation : il
-    // atterrit en corbeille, parfois en quelques secondes. Et dans la sémantique
+    // Le mail du code peut avoir été supprimé : il atterrit alors en corbeille,
+    // parfois en quelques secondes. Et dans la sémantique
     // IMAP de Gmail, "All Mail" N'INCLUT PAS la corbeille. Chercher dans INBOX
     // seul — ou même dans All Mail — ne trouve donc rien dès que le mail a été
     // supprimé. On balaie les trois dossiers.
@@ -104,7 +105,7 @@ async function pollGmail({ since, user, pass, consommes = [] }) {
           const body = msg.bodyParts?.get('text')?.toString('utf8') || '';
           const code = extractCode(subject) || extractCode(body);
           // On retient OÙ se trouve le message : il devra être supprimé une fois
-          // le code utilisé, pour ne pas polluer la boîte que Zapier surveille.
+          // le code utilisé, pour ne pas laisser traîner un code périmé.
           if (code && !consommes.includes(code)) {
             candidates.push({ code, at: msg.internalDate || new Date(0), mailbox, uid: String(uid) });
           }
@@ -137,7 +138,7 @@ function pollFileRelay({ since }) {
 }
 
 /** Codes déjà présentés au site : on ne les rejoue jamais. */
-function lireConsommes() {
+export function lireConsommes() {
   try {
     const l = JSON.parse(fs.readFileSync(CONSUMED_PATH, 'utf8'));
     const limite = Date.now() - 6 * 3600 * 1000; // au-delà de 6h, sans objet
@@ -152,12 +153,31 @@ export function marquerConsomme(code) {
 }
 
 /**
+ * Signale qu'une connexion du bot attend son code. Le relais (relay_codes.js)
+ * ne transmet aucun code tant que ce marqueur a moins de 10 minutes : ce code-là
+ * est celui du bot, pas celui de l'autre personne du foyer.
+ */
+export function debutConnexion() {
+  try { fs.writeFileSync(LOGIN_LOCK_PATH, JSON.stringify({ at: Date.now(), pid: process.pid })); } catch {}
+}
+
+export function finConnexion() {
+  try { fs.unlinkSync(LOGIN_LOCK_PATH); } catch {}
+}
+
+export function connexionEnCours() {
+  try {
+    const { at } = JSON.parse(fs.readFileSync(LOGIN_LOCK_PATH, 'utf8'));
+    return Date.now() - at < 10 * 60 * 1000;
+  } catch { return false; }
+}
+
+/**
  * Supprime le mail dont le code vient d'être utilisé.
  *
  * Une autre personne du foyer peut se connecter au même compte depuis son poste
- * code via Zapier, qui surveille cette boîte. Zapier repère mal les empilements
- * et peut relayer un code déjà consommé par le bot. Laisser traîner nos mails
- * fait donc échouer SES connexions : on nettoie derrière nous.
+ * et recevoir son code par le relais Telegram : un mail du bot laissé en place
+ * ne doit pas lui faire prendre un code déjà consommé. On nettoie derrière nous.
  *
  * Un échec de suppression n'est jamais bloquant — la connexion, elle, a réussi.
  */
@@ -201,8 +221,7 @@ export async function supprimerMail(ref, { user, pass } = {}) {
  * Balaie les mails dont le code a DÉJÀ été consommé par le bot.
  *
  * Filet de sécurité : si une suppression a échoué (réseau, verrou IMAP), le mail
- * resterait dans la boîte surveillée et pourrait faire relayer à cette personne
- * un code périmé. On ne touche qu'aux codes présents dans notre propre registre :
+ * resterait dans la boîte et cette personne pourrait y prendre un code périmé. On ne touche qu'aux codes présents dans notre propre registre :
  * un code frais destiné à quelqu'un d'autre n'y figure jamais.
  */
 export async function nettoyerMailsConsommes({ user, pass } = {}) {

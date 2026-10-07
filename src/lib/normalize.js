@@ -12,8 +12,11 @@
 // « citron vert » au milieu de « Filets de thon à l'huile d'olive Citron vert ».
 
 // Mots qui n'aident pas à discriminer (marques distributeur, unités, liaisons).
+// « bio » est retiré du calcul de couverture parce que le site l'écrit de mille
+// façons (« bio », « biologique », « U BIO ») à n'importe quelle place ; il est
+// traité à part, comme une exigence, par estBio() plus bas.
 const NOISE = new Set([
-  'u', 'bio', 'saveurs', 'tout', 'petits', 'le', 'la', 'les', 'de', 'du', 'des',
+  'u', 'bio', 'biologique', 'biologiques', 'organic', 'saveurs', 'tout', 'petits', 'le', 'la', 'les', 'de', 'du', 'des',
   'a', 'au', 'aux', 'en', 'et', 'l', 'd', 'x', 'g', 'kg', 'ml', 'cl', 'mg',
 ]);
 
@@ -42,6 +45,13 @@ export function normalize(s) {
     .replace(/[^a-z0-9]+/g, ' ')
     .trim()
     .replace(/\s+/g, ' ');
+}
+
+const BIO = new Set(['bio', 'biologique', 'biologiques', 'organic']);
+
+/** Le libellé dit-il « bio » ? Vaut pour une ligne de liste comme pour un produit. */
+export function estBio(s) {
+  return normalize(s).split(' ').some((t) => BIO.has(t));
 }
 
 /** Tokens significatifs, anglais traduit, bruit retiré. */
@@ -79,8 +89,14 @@ function findToken(tok, list) {
 /**
  * Similarité 0..1, orientée « le candidat répond-il à la demande ».
  * Asymétrique à dessein : similarity(demande, candidat).
+ *
+ * Une demande bio n'est satisfaite que par un produit bio : le score d'un
+ * candidat non bio est divisé par deux, ce qui le fait passer sous tous les
+ * seuils d'ajout automatique. Sans ça, « Bananes bio » valait 1,00 contre
+ * « Banane Cavendish » et le non-bio partait au panier sans question.
+ * `{ bio: false }` ignore cette exigence, pour déduire un rayon par exemple.
  */
-export function similarity(wanted, candidate) {
+export function similarity(wanted, candidate, { bio = true } = {}) {
   const q = tokens(wanted);
   const c = tokens(candidate);
   if (!q.length || !c.length) return 0;
@@ -101,5 +117,7 @@ export function similarity(wanted, candidate) {
   // Léger malus pour les noms très bavards, qui décrivent souvent autre chose.
   const concision = Math.min(1, (q.length + 3) / c.length);
 
-  return Number((0.62 * coverage + 0.26 * head + 0.12 * concision).toFixed(4));
+  let score = 0.62 * coverage + 0.26 * head + 0.12 * concision;
+  if (bio && estBio(wanted) && !estBio(candidate)) score *= 0.5;
+  return Number(score.toFixed(4));
 }

@@ -124,3 +124,40 @@ export async function readCart(page) {
     };
   });
 }
+
+/**
+ * Retire `quantity` unités d'un article depuis la page panier, avec le même
+ * bouton « − » que vide-panier. Ne sert qu'à reprendre ce que le bot vient
+ * lui-même d'ajouter : jamais un article déjà présent avant le run.
+ * La page est rechargée à chaque clic, le stepper ne se met pas à jour seul.
+ */
+export async function removeFromCart(page, itemid, quantity = 1) {
+  const ligne = (id) => {
+    const l = document.querySelector(`#cart-table .cart-row[data-itemid="${id}"]`);
+    if (!l) return { qty: 0 };
+    const q = l.querySelector('input[type="number"]');
+    return { qty: q ? Number(q.value) || 1 : 1 };
+  };
+  await page.goto(CART_URL, { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(2500);
+  const avant = (await page.evaluate(ligne, itemid)).qty;
+  if (!avant) return { ok: false, reason: 'article absent du panier' };
+  const cible = Math.max(0, avant - quantity);
+
+  for (let tour = 0; tour < quantity + 2; tour++) {
+    const clic = await page.evaluate((id) => {
+      const l = document.querySelector(`#cart-table .cart-row[data-itemid="${id}"]`);
+      const dec = l?.querySelector('.product-button__dec');
+      if (!dec) return false;
+      dec.click();
+      return true;
+    }, itemid);
+    if (!clic) break;
+    await page.waitForTimeout(2000);
+    await page.goto(CART_URL, { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(2500);
+    if ((await page.evaluate(ligne, itemid)).qty <= cible) return { ok: true };
+  }
+  const reste = (await page.evaluate(ligne, itemid)).qty;
+  return reste <= cible ? { ok: true } : { ok: false, reason: `quantité restante ${reste}, attendue ${cible}` };
+}

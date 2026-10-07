@@ -82,6 +82,25 @@ souvent l'emporte sur un produit mieux nommé.
 
 ---
 
+## Un ajout de dernière minute manque au panier
+
+La note est partagée : une modification faite sur un autre appareil n'arrive sur
+le Mac du bot que par iCloud, et seulement quand l'app Notes tourne. Le bot lance
+donc Notes s'il est fermé, attend 45 s, puis relit la note jusqu'à ce qu'elle ne
+change plus pendant 15 s.
+
+Le bilan indique l'heure de la note lue (« 📝 Liste lue telle que modifiée le… »).
+Si elle est antérieure à votre ajout, iCloud n'avait pas encore livré la
+modification : relancez `prepare-cart`, qui ajoute sans rien vider. Si cela se
+répète, allongez l'attente dans `.env` :
+
+```bash
+NOTE_SYNC_COLD_MS=90000   # après le lancement de Notes
+NOTE_SYNC_STABLE_MS=30000 # durée sans changement exigée
+```
+
+Garder Notes ouvert en permanence sur le Mac du bot évite l'attente au lancement.
+
 ## Le panier contient des articles en double
 
 **Cause.** `prepare-cart` **ajoute** toujours au panier existant, il ne le vide

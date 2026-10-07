@@ -24,6 +24,11 @@ Le programme lit la section de courses dans la note Apple, résout chaque ligne
 IA en ligne de commande), remplit le panier, **relit le panier pour vérifier ce
 qui s'y trouve vraiment**, puis envoie le bilan et les éventuelles questions.
 
+Avant de lire la note, il attend qu'iCloud ait livré les dernières
+modifications (jusqu'à 2 min si Notes était fermé) : ne pas l'interrompre. Le
+bilan donne l'heure de la note lue ; si un ajout de dernière minute manque,
+relancer `prepare-cart`, qui ajoute sans rien vider.
+
 Si le site réclame un code de connexion, le programme le récupère seul dans la
 boîte mail et **supprime ensuite le message**. En cas d'échec, écrivez le code
 dans le fichier de dépannage et il repart :
@@ -99,6 +104,12 @@ bot pose de questions.
 `added` ajouté · `question` en attente de réponse · `clicked_but_absent` cliqué
 mais absent du panier à la relecture · `not_found` introuvable · `error` échec
 isolé sur cette ligne.
+
+Quand la relecture finale signale un problème sur un article que le bot vient
+d'ajouter seul (non bio alors que la liste dit bio, jus au lieu du fruit…), il
+le retire du panier et en refait une question : relayer la question, ne pas
+remettre l'article. Les articles déjà au panier avant le run, épinglés par le
+vocabulaire ou de saison ne sont jamais retirés.
 
 ## Navigateur — ne pas modifier
 

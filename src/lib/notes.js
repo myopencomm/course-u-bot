@@ -22,10 +22,14 @@ const COUNT_UNITS = /^(bouteilles?|tablettes?|bo[iî]tes?|paquets?|pi[eè]ces?|s
 // Unités de mesure : le nombre qui précède décrit la taille, pas la quantité.
 const SIZE_UNITS = /^(g|kg|mg|l|cl|ml|dl|cm|mm)$/i;
 
+function osascript(script) {
+  return execFileSync('osascript', ['-e', script], { encoding: 'utf8', maxBuffer: 10 * 1024 * 1024, stdio: ['pipe', 'pipe', 'pipe'] });
+}
+
 function readNoteBody() {
   const script = `tell application "Notes" to return body of (first note whose name is "${NOTE_TITLE}")`;
   try {
-    return execFileSync('osascript', ['-e', script], { encoding: 'utf8', maxBuffer: 10 * 1024 * 1024, stdio: ['pipe', 'pipe', 'pipe'] });
+    return osascript(script);
   } catch (err) {
     const brut = String(err.stderr || err.message);
     if (/-1719|Index non valable|Invalid index|can.t get note/i.test(brut)) {
@@ -107,4 +111,69 @@ export function parseLine(raw) {
 export function readShoppingList({ fromFile } = {}) {
   const text = fromFile ? fs.readFileSync(fromFile, 'utf8') : htmlToText(readNoteBody());
   return extractSection(text).map(parseLine);
+}
+
+/** Date de dernière modification de la note, d'après Notes. */
+function readNoteModified() {
+  // Calculé en secondes par rapport à maintenant : une date AppleScript sort
+  // dans la langue du système et ne se relit pas de façon fiable.
+  const script = `tell application "Notes" to return ((modification date of (first note whose name is "${NOTE_TITLE}")) - (current date)) as integer`;
+  try {
+    const ecart = Number(osascript(script).trim());
+    return Number.isFinite(ecart) ? new Date(Date.now() + ecart * 1000) : null;
+  } catch { return null; }
+}
+
+const pause = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Lit la liste après avoir laissé à iCloud le temps de livrer les dernières
+ * modifications.
+ *
+ * La note est partagée : une modification faite sur un autre appareil n'arrive
+ * sur ce Mac que si Notes tourne, quelques secondes à quelques dizaines de
+ * secondes plus tard. Quand Notes était fermé, osascript le lançait et lisait
+ * aussitôt la copie locale, d'avant la synchronisation : un ajout de dernière
+ * minute manquait au panier.
+ *
+ * On lance donc Notes s'il ne tourne pas et on lui laisse le temps de se
+ * synchroniser, puis on relit la note jusqu'à ce qu'elle ne bouge plus.
+ * Réglages : NOTE_SYNC_COLD_MS (attente après lancement, 45 s), NOTE_SYNC_STABLE_MS
+ * (durée sans changement exigée, 15 s), NOTE_SYNC_MAX_MS (plafond, 120 s).
+ *
+ * @returns {{ items, modifiedAt: Date|null, waitedMs: number }}
+ */
+export async function readShoppingListFresh({ fromFile, log = console.log } = {}) {
+  if (fromFile) return { items: readShoppingList({ fromFile }), modifiedAt: null, waitedMs: 0 };
+
+  const debut = Date.now();
+  const coldMs = Number(process.env.NOTE_SYNC_COLD_MS || 45000);
+  const stableMs = Number(process.env.NOTE_SYNC_STABLE_MS || 15000);
+  const maxMs = Number(process.env.NOTE_SYNC_MAX_MS || 120000);
+
+  let lance = false;
+  try { lance = osascript('application "Notes" is running').trim() === 'true'; } catch {}
+  if (!lance) {
+    log(`[NOTE] Notes était fermé : lancement, puis ${Math.round(coldMs / 1000)} s pour la synchronisation iCloud.`);
+    try { osascript('tell application "Notes" to launch'); } catch {}
+    await pause(coldMs);
+  }
+
+  let corps = readNoteBody();
+  let depuis = Date.now();
+  while (Date.now() - depuis < stableMs && Date.now() - debut < maxMs) {
+    await pause(5000);
+    const nouveau = readNoteBody();
+    if (nouveau !== corps) {
+      log('[NOTE] La note vient de changer (synchronisation en cours) : on attend qu\'elle se stabilise.');
+      corps = nouveau;
+      depuis = Date.now();
+    }
+  }
+
+  return {
+    items: extractSection(htmlToText(corps)).map(parseLine),
+    modifiedAt: readNoteModified(),
+    waitedMs: Date.now() - debut,
+  };
 }

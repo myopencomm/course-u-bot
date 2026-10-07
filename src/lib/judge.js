@@ -12,6 +12,7 @@
 // on laisse la question à l'humain en dessous.
 
 import { execFile } from 'child_process';
+import { estBio, normalize } from './normalize.js';
 
 // ── Arbitre : n'importe quel assistant en ligne de commande ───────────────────
 //
@@ -83,13 +84,13 @@ const CONSIGNE = [
   'Tu assistes un bot de courses francais sur coursesu.com.',
   'Reponds UNIQUEMENT par des objets JSON, un par ligne, sans texte autour:',
   '{"ligne":<n>,"itemid":"<id>"|null,"confiance":<0..1>,"raison":"<12 mots max>"}',
-  'Mets itemid a null si un humain doit vraiment trancher.',
-  'Regles de choix:',
-  '- privilegier le produit brut sur le derive (le fruit plutot que le jus, le sirop ou la conserve);',
-  '- respecter les qualificatifs: vert != jaune, rouge != blanc, bio si demande;',
-  '- un vinaigre/huile "nature" prime sur une version aromatisee, sauf demande contraire;',
-  '- a qualite egale, preferer ce qui est deja achete par l utilisateur;',
-  '- deux libelles identiques sont un doublon catalogue: en choisir un, ne pas hesiter pour autant.',
+  'Regles de choix, par ordre de priorite:',
+  '1. la nature du produit: le fruit ou le legume frais plutot que le jus, le sirop ou la conserve, sauf si la ligne demande le derive. Quand un rayon attendu est indique, le bon produit en vient;',
+  '2. les qualificatifs demandes: vert != jaune, rouge != blanc, bio si la ligne dit bio;',
+  '3. un vinaigre/huile "nature" prime sur une version aromatisee, sauf demande contraire;',
+  '4. a qualite egale, preferer ce qui est deja achete par l utilisateur.',
+  'Si aucune option ne respecte a la fois 1 et 2, mets itemid a null: un bon produit manquant vaut mieux qu un mauvais au panier, l utilisateur choisira.',
+  'Deux libelles identiques sont un doublon catalogue: en choisir un, ne pas hesiter pour autant.',
 ].join('\n');
 
 /** Extrait les objets JSON d'une reponse, qu'elle soit en tableau ou ligne a ligne. */
@@ -137,6 +138,22 @@ function appelerArbitre(prompt) {
 }
 
 /**
+ * Garde-fou sur le choix de l'arbitre : il a déjà pris un jus de citron vert
+ * bio pour « Citron vert bio » avec 0,9 de confiance. Ce que le code sait
+ * vérifier seul, il le vérifie : l'exigence bio et le rayon attendu.
+ * @returns {string|null} la raison du refus, ou null si le choix tient.
+ */
+function verifierChoix(q, itemid) {
+  const opt = q?.options.find((o) => o.itemid === itemid);
+  if (!opt) return null;
+  if (estBio(q.wanted) && !estBio(opt.name)) return 'refusé : non bio';
+  if (q.expectedCat1 && opt.cat1 && normalize(opt.cat1) !== normalize(q.expectedCat1)) {
+    return `refusé : rayon ${opt.cat1} au lieu de ${q.expectedCat1}`;
+  }
+  return null;
+}
+
+/**
  * Arbitre les lignes que les regles n'ont pas su trancher.
  * @param {Array} questions  [{ index, wanted, quantity, options:[{itemid,name,brand,price,rating,cat1,historyCount}] }]
  * @returns {Map<number, {itemid, confiance, raison}>} decisions retenues (confiance suffisante)
@@ -156,7 +173,8 @@ export async function arbitrer(questions) {
       ];
       return `  ${'abcdef'[i]}) ${bits.join(' | ')}`;
     }).join('\n');
-    return `LIGNE ${q.index}: "${q.wanted}" (quantite ${q.quantity || 1})\n${opts}`;
+    const rayon = q.expectedCat1 ? `, rayon attendu ${q.expectedCat1}` : '';
+    return `LIGNE ${q.index}: "${q.wanted}" (quantite ${q.quantity || 1}${rayon})\n${opts}`;
   }).join('\n\n');
 
   const prompt = `Liste de courses et candidats trouves sur le site.\nPour chaque ligne, choisis le meilleur produit.\n\n${lignes}`;
@@ -173,6 +191,8 @@ export async function arbitrer(questions) {
     const conf = Number(o.confiance);
     if (!Number.isFinite(n) || !o.itemid) continue;
     if (!(conf >= config().seuil)) { rejets.push(`ligne ${n} conf=${conf}`); continue; }
+    const refus = verifierChoix(questions.find((q) => q.index === n), String(o.itemid));
+    if (refus) { rejets.push(`ligne ${n} ${refus}`); continue; }
     decisions.set(n, { itemid: String(o.itemid), confiance: conf, raison: String(o.raison || '').slice(0, 80) });
   }
   return {
@@ -186,7 +206,7 @@ export async function arbitrer(questions) {
  * Renvoie un verdict lisible, destine au bilan Telegram.
  */
 export async function relirePanier({ items, cart }) {
-  const liste = items.map((i) => `- ${i.wanted} (x${i.quantity})`).join('\n');
+  const liste = items.map((i, k) => `${k + 1}. ${i.wanted} (x${i.quantity})`).join('\n');
   const panier = cart.items.length
     ? cart.items.map((i) => `- ${i.name || i.itemid} (x${i.quantity})`).join('\n')
     : '(panier vide)';
@@ -200,7 +220,8 @@ export async function relirePanier({ items, cart }) {
     'PANIER REEL:', panier,
     '',
     'Reponds UNIQUEMENT par un objet JSON:',
-    '{"verdict":"ok"|"problemes","anomalies":["<une phrase par probleme>"]}',
+    '{"verdict":"ok"|"problemes","anomalies":[{"ligne":<numero dans la liste demandee>|null,"probleme":"<une phrase>"}]}',
+    'ligne est le numero de la ligne de liste concernee, null pour un article present non demande.',
     'Signale: article demande absent, article present non demande, quantite douteuse,',
     'produit manifestement hors sujet (jus au lieu du fruit, aromatise au lieu de nature).',
     'N invente pas de probleme: si tout correspond, verdict "ok" et anomalies vide.',
@@ -214,9 +235,17 @@ export async function relirePanier({ items, cart }) {
   if (!m) return { verdict: 'illisible', anomalies: [] };
   try {
     const o = JSON.parse(m[0]);
+    // anomalies reste une liste de phrases (bilan Telegram, verify-cart) ;
+    // details garde le numéro de ligne, qui permet à prepare-cart de corriger.
+    const details = (Array.isArray(o.anomalies) ? o.anomalies : []).slice(0, 8).map((a) => (
+      typeof a === 'string'
+        ? { ligne: null, probleme: a }
+        : { ligne: Number.isInteger(a?.ligne) ? a.ligne : null, probleme: String(a?.probleme || '') }
+    )).filter((a) => a.probleme);
     return {
       verdict: o.verdict === 'ok' ? 'ok' : 'problemes',
-      anomalies: Array.isArray(o.anomalies) ? o.anomalies.slice(0, 8) : [],
+      anomalies: details.map((a) => a.probleme),
+      details,
       ms: rep.ms,
       cout: rep.cout,
     };
