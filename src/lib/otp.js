@@ -21,6 +21,7 @@ import { OTP_INBOX_PATH, DATA_DIR } from './paths.js';
 
 const CONSUMED_PATH = path.join(DATA_DIR, 'otp_consumed.json');
 const LOGIN_LOCK_PATH = path.join(DATA_DIR, 'connexion_en_cours.json');
+const RELAYED_PATH = path.join(DATA_DIR, 'codes_relayes.json');
 
 // Le code Super U fait 8 chiffres (placeholder du site : "Exemple : 12345678").
 // On accepte 6 à 8 pour encaisser un changement de format, en privilégiant le
@@ -144,6 +145,26 @@ export function lireConsommes() {
     const limite = Date.now() - 6 * 3600 * 1000; // au-delà de 6h, sans objet
     return Array.isArray(l) ? l.filter((e) => e && e.at > limite) : [];
   } catch { return []; }
+}
+
+/**
+ * Codes envoyés au reste du foyer par le relais Telegram. Le bot ne les prend
+ * jamais : sa fenêtre de recherche remonte 4 minutes avant sa connexion, et si
+ * Rosie vient de se connecter, son code y figure — le bot le saisissait, sa
+ * connexion échouait, et il supprimait au passage le mail de Rosie.
+ */
+export function lireRelayes() {
+  try {
+    const l = JSON.parse(fs.readFileSync(RELAYED_PATH, 'utf8'));
+    const limite = Date.now() - 6 * 3600 * 1000;
+    return Array.isArray(l) ? l.filter((e) => e && e.at > limite) : [];
+  } catch { return []; }
+}
+
+export function marquerRelaye(code) {
+  const l = lireRelayes().filter((e) => e.code !== code);
+  l.push({ code, at: Date.now() });
+  try { fs.writeFileSync(RELAYED_PATH, JSON.stringify(l.slice(-20), null, 2)); } catch {}
 }
 
 export function marquerConsomme(code) {
@@ -292,7 +313,8 @@ export async function waitForCode({ since, timeoutMs = 180000, onWaiting, graceM
   while (Date.now() < deadline) {
     if (gmailUsable) {
       try {
-        const trouve = await pollGmail({ since: start, user, pass, consommes: lireConsommes().map((e) => e.code) });
+        const exclus = [...lireConsommes(), ...lireRelayes()].map((e) => e.code);
+        const trouve = await pollGmail({ since: start, user, pass, consommes: exclus });
         if (trouve) return { code: trouve.code, source: 'gmail', ref: { mailbox: trouve.mailbox, uid: trouve.uid } };
         echecs = 0;
       } catch (err) {

@@ -122,6 +122,12 @@ await essai('relais des codes : muet pendant une connexion du bot', async () => 
   assert.equal(connexionEnCours(), false, 'marqueur non levé');
 });
 
+await essai('relais des codes : un code relayé est exclu pour le bot', async () => {
+  const { marquerRelaye, lireRelayes } = await import('./lib/otp.js');
+  marquerRelaye('00000000');
+  assert(lireRelayes().some((e) => e.code === '00000000'), 'code relayé non inscrit');
+});
+
 await essai('arbitre désactivé : dégradation propre', async () => {
   process.env.JUDGE_ENABLED = 'false';
   const { relirePanier } = await import('./lib/judge.js');

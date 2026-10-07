@@ -16,10 +16,13 @@
 //   - le bot est lui-même en train de se connecter (marqueur debutConnexion) :
 //     ce code-là est le sien, il le consomme seul ;
 //   - le code figure déjà dans le registre des codes consommés par le bot.
+//
+// Chaque code relayé est inscrit dans data/codes_relayes.json : le bot, s'il se
+// connecte juste après, ne le prendra pas pour le sien.
 
 import 'dotenv/config';
 import { ImapFlow } from 'imapflow';
-import { extractCode, SENDER_DOMAIN, SENDER_HINTS, lireConsommes, connexionEnCours } from './lib/otp.js';
+import { extractCode, SENDER_DOMAIN, SENDER_HINTS, lireConsommes, connexionEnCours, marquerRelaye } from './lib/otp.js';
 import { sendTelegram } from './lib/telegram.js';
 
 const TARGET = process.env.RELAY_TELEGRAM_TARGET || '';
@@ -84,6 +87,8 @@ async function examiner() {
       { target: TARGET, account: ACCOUNT },
     );
     envoyes.add(code);
+    // Inscrit même si l'envoi a échoué : c'est le code de quelqu'un d'autre.
+    marquerRelaye(code);
     console.log(`[RELAIS] Code de ${heure} ${ok ? 'envoyé sur Telegram' : 'NON envoyé (Telegram indisponible)'}.`);
   }
 }
