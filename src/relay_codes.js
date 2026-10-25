@@ -53,20 +53,30 @@ if (!TARGET || !USER || !PASS) {
   process.exit(0);
 }
 
-const client = new ImapFlow({
+const IMAP = {
   host: process.env.IMAP_HOST || 'imap.gmail.com',
   port: Number(process.env.IMAP_PORT || 993),
   secure: true,
   auth: { user: USER, pass: PASS },
   logger: false,
+};
+const client = new ImapFlow({
+  ...IMAP,
   // Gmail coupe une IDLE au bout de ~30 min : on la renouvelle avant.
   maxIdleTime: 5 * 60 * 1000,
 });
+// Contrôle par une connexion neuve, à intervalle plus long : le filet de
+// sécurité si la connexion permanente cesse de voir les nouveaux mails.
+const CONTROLE_MS = 2 * 60 * 1000;
 
 let dernierUid = 0;
 const envoyes = new Set();
 
 async function codesSuperU() {
+  // Sans NOOP, Gmail ne met pas à jour la vue de la boîte d'une connexion
+  // ouverte : la recherche ne voyait pas le mail arrivé depuis, et un code
+  // reçu à 19:03 n'est jamais parti.
+  await client.noop();
   const uids = await client.search(
     { from: SENDER_DOMAIN, since: new Date(Date.now() - 86400000) },
     { uid: true },
@@ -81,20 +91,22 @@ async function examiner({ ageMax = MAX_AGE_MS } = {}) {
 
     const msg = await client.fetchOne(String(uid), { envelope: true, internalDate: true, bodyParts: ['TEXT'] }, { uid: true });
     if (!msg) continue;
-    if (msg.internalDate && Date.now() - msg.internalDate.getTime() > ageMax) continue;
+    const recu = msg.internalDate ? msg.internalDate.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '?';
+    if (msg.internalDate && Date.now() - msg.internalDate.getTime() > ageMax) { log(`[RELAIS] Mail de ${recu} ignoré : trop ancien.`); continue; }
 
     const from = (msg.envelope?.from || []).map((a) => `${a.name || ''} ${a.address || ''}`).join(' ').toLowerCase();
     const subject = msg.envelope?.subject || '';
-    if (!SENDER_HINTS.some((h) => `${from} ${subject}`.toLowerCase().includes(h))) continue;
+    if (!SENDER_HINTS.some((h) => `${from} ${subject}`.toLowerCase().includes(h))) { log(`[RELAIS] Mail de ${recu} ignoré : expéditeur inattendu.`); continue; }
 
     const code = extractCode(subject) || extractCode(msg.bodyParts?.get('text')?.toString('utf8') || '');
-    if (!code || envoyes.has(code)) continue;
+    if (!code) { log(`[RELAIS] Mail de ${recu} ignoré : aucun code lu.`); continue; }
+    if (envoyes.has(code)) continue;
 
     if (connexionEnCours()) {
       log('[RELAIS] Code reçu pendant une connexion du bot : gardé pour lui.');
       continue;
     }
-    if (lireConsommes().some((e) => e.code === code)) continue;
+    if (lireConsommes().some((e) => e.code === code)) { log(`[RELAIS] Code de ${recu} ignoré : utilisé par le bot.`); continue; }
     // Déjà relayé avant un redémarrage : ne pas le reposter.
     if (lireRelayes().some((e) => e.code === code)) { envoyes.add(code); continue; }
 
@@ -142,6 +154,33 @@ await avecDelai(examiner({ ageMax: FRAIS_AU_DEMARRAGE_MS }), EXAMEN_MAX_MS);
 
 client.on('exists', examinerBientot);
 setInterval(examinerBientot, POLL_MS);
+
+// Le 25/10, la connexion permanente n'a jamais vu un code reçu à 19:03,
+// qu'une connexion neuve trouvait aussitôt. Une connexion courte vérifie donc
+// régulièrement qu'aucun mail Super U plus récent ne lui échappe ; si c'est
+// le cas, on redémarre : le démarrage envoie les codes de moins de 3 minutes.
+setInterval(async () => {
+  const temoin = new ImapFlow(IMAP);
+  try {
+    await avecDelai(temoin.connect(), 30000);
+    const verrou = await temoin.getMailboxLock('INBOX');
+    const uids = (await temoin.search({ from: SENDER_DOMAIN, since: new Date(Date.now() - 86400000) }, { uid: true })) || [];
+    verrou.release();
+    const dernier = Math.max(0, ...uids);
+    if (dernier > dernierUid) {
+      // Laisse une chance à l'examen en cours avant de conclure.
+      await file;
+      if (dernier > dernierUid) {
+        log(`[RELAIS] Vue périmée : mail ${dernier} invisible pour la connexion permanente — redémarrage.`);
+        process.exit(1);
+      }
+    }
+  } catch (err) {
+    log(`[RELAIS] Contrôle impossible : ${String(err.message).slice(0, 100)}`);
+  } finally {
+    temoin.logout().catch(() => {});
+  }
+}, CONTROLE_MS);
 // Connexion perdue (réseau, mise en veille) : on sort en erreur, launchd relance.
 client.on('close', () => {
   log('[RELAIS] Connexion Gmail fermée — redémarrage.');
