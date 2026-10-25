@@ -11,6 +11,8 @@
 //
 // Il tourne en continu (voir docs/TELEGRAM.md pour le lancer au démarrage du
 // Mac) et ne fait rien d'autre : il lit, il ne supprime ni ne déplace aucun mail.
+// Il écoute la boîte (IDLE) et la relit aussi toutes les 15 s : un code part
+// dans la quinzaine de secondes qui suit son arrivée.
 //
 // Il se tait dans deux cas :
 //   - le bot est lui-même en train de se connecter (marqueur debutConnexion) :
@@ -22,7 +24,7 @@
 
 import 'dotenv/config';
 import { ImapFlow } from 'imapflow';
-import { extractCode, SENDER_DOMAIN, SENDER_HINTS, lireConsommes, connexionEnCours, marquerRelaye } from './lib/otp.js';
+import { extractCode, SENDER_DOMAIN, SENDER_HINTS, lireConsommes, lireRelayes, connexionEnCours, marquerRelaye } from './lib/otp.js';
 import { sendTelegram } from './lib/telegram.js';
 
 const TARGET = process.env.RELAY_TELEGRAM_TARGET || '';
@@ -31,9 +33,22 @@ const USER = process.env.GMAIL_USER;
 const PASS = process.env.GMAIL_APP_PASSWORD;
 // Un code Super U expire vite : un mail plus ancien ne sert plus à personne.
 const MAX_AGE_MS = 10 * 60 * 1000;
+// Gmail ne signale pas toujours un nouveau mail pendant l'IDLE : un code reçu
+// à 17:50 n'a été vu qu'au renouvellement de l'IDLE, cinq minutes plus tard.
+// On regarde donc aussi la boîte à intervalle court.
+const POLL_MS = 15 * 1000;
+// Au-delà, la connexion est tenue pour morte (socket à moitié fermé après une
+// veille ou une coupure réseau) : on sort, launchd relance.
+const EXAMEN_MAX_MS = 60 * 1000;
+// Relancé juste après une coupure, le relais ne doit pas taire le code qui
+// vient d'arriver : au démarrage, un code plus récent que ça est encore envoyé.
+const FRAIS_AU_DEMARRAGE_MS = 3 * 60 * 1000;
+
+// Horodaté : sans l'heure, un retard d'envoi ne se diagnostique pas.
+const log = (m) => console.log(`${new Date().toLocaleTimeString('fr-FR')} ${m}`);
 
 if (!TARGET || !USER || !PASS) {
-  console.log('[RELAIS] RELAY_TELEGRAM_TARGET, GMAIL_USER et GMAIL_APP_PASSWORD sont requis dans .env — relais non démarré.');
+  log('[RELAIS] RELAY_TELEGRAM_TARGET, GMAIL_USER et GMAIL_APP_PASSWORD sont requis dans .env — relais non démarré.');
   // Sortie « réussie » : launchd ne relance pas un relais non configuré.
   process.exit(0);
 }
@@ -59,14 +74,14 @@ async function codesSuperU() {
   return uids || [];
 }
 
-async function examiner() {
+async function examiner({ ageMax = MAX_AGE_MS } = {}) {
   for (const uid of await codesSuperU()) {
     if (uid <= dernierUid) continue;
     dernierUid = uid;
 
     const msg = await client.fetchOne(String(uid), { envelope: true, internalDate: true, bodyParts: ['TEXT'] }, { uid: true });
     if (!msg) continue;
-    if (msg.internalDate && Date.now() - msg.internalDate.getTime() > MAX_AGE_MS) continue;
+    if (msg.internalDate && Date.now() - msg.internalDate.getTime() > ageMax) continue;
 
     const from = (msg.envelope?.from || []).map((a) => `${a.name || ''} ${a.address || ''}`).join(' ').toLowerCase();
     const subject = msg.envelope?.subject || '';
@@ -76,10 +91,12 @@ async function examiner() {
     if (!code || envoyes.has(code)) continue;
 
     if (connexionEnCours()) {
-      console.log(`[RELAIS] Code reçu pendant une connexion du bot : gardé pour lui.`);
+      log('[RELAIS] Code reçu pendant une connexion du bot : gardé pour lui.');
       continue;
     }
     if (lireConsommes().some((e) => e.code === code)) continue;
+    // Déjà relayé avant un redémarrage : ne pas le reposter.
+    if (lireRelayes().some((e) => e.code === code)) { envoyes.add(code); continue; }
 
     const heure = (msg.internalDate || new Date()).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
     const ok = await sendTelegram(
@@ -89,26 +106,45 @@ async function examiner() {
     envoyes.add(code);
     // Inscrit même si l'envoi a échoué : c'est le code de quelqu'un d'autre.
     marquerRelaye(code);
-    console.log(`[RELAIS] Code de ${heure} ${ok ? 'envoyé sur Telegram' : 'NON envoyé (Telegram indisponible)'}.`);
+    const delai = msg.internalDate ? ` ${Math.round((Date.now() - msg.internalDate.getTime()) / 1000)} s après réception` : '';
+    log(`[RELAIS] Code de ${heure} ${ok ? `envoyé sur Telegram${delai}` : 'NON envoyé (Telegram indisponible)'}.`);
   }
+}
+
+/** Échoue si Gmail ne répond pas à temps : la connexion est alors morte. */
+function avecDelai(promesse, ms) {
+  let minuteur;
+  const delai = new Promise((_, rejeter) => {
+    minuteur = setTimeout(() => rejeter(new Error(`Gmail muet depuis ${ms / 1000} s`)), ms);
+  });
+  return Promise.race([promesse, delai]).finally(() => clearTimeout(minuteur));
+}
+
+// Les examens passent l'un après l'autre : deux examens simultanés enverraient
+// le même code deux fois.
+let file = Promise.resolve();
+function examinerBientot() {
+  file = file
+    .then(() => avecDelai(examiner(), EXAMEN_MAX_MS))
+    .catch((err) => {
+      log(`[RELAIS] Lecture en échec : ${String(err.message).slice(0, 100)}`);
+      if (/muet/.test(err.message)) process.exit(1);
+    });
 }
 
 await client.connect();
 await client.getMailboxLock('INBOX');
-// Au démarrage, les codes déjà présents ne sont pas renvoyés.
-dernierUid = Math.max(0, ...(await codesSuperU()));
+log(`[RELAIS] À l'écoute des codes Super U (envoi vers ${TARGET}).`);
 
-// Les événements sont traités l'un après l'autre : deux examens simultanés
-// enverraient le même code deux fois.
-let file = Promise.resolve();
-client.on('exists', () => {
-  file = file.then(examiner).catch((err) => console.warn(`[RELAIS] Lecture en échec : ${String(err.message).slice(0, 100)}`));
-});
+// Au démarrage, seuls les codes tout frais et jamais relayés partent : un
+// redémarrage ne fait ni perdre le code qui arrive, ni reposter les anciens.
+await avecDelai(examiner({ ageMax: FRAIS_AU_DEMARRAGE_MS }), EXAMEN_MAX_MS);
+
+client.on('exists', examinerBientot);
+setInterval(examinerBientot, POLL_MS);
 // Connexion perdue (réseau, mise en veille) : on sort en erreur, launchd relance.
 client.on('close', () => {
-  console.log('[RELAIS] Connexion Gmail fermée — redémarrage.');
+  log('[RELAIS] Connexion Gmail fermée — redémarrage.');
   process.exit(1);
 });
-client.on('error', (err) => console.warn(`[RELAIS] Erreur IMAP : ${String(err.message).slice(0, 100)}`));
-
-console.log(`[RELAIS] À l'écoute des codes Super U (envoi vers ${TARGET}).`);
+client.on('error', (err) => log(`[RELAIS] Erreur IMAP : ${String(err.message).slice(0, 100)}`));
