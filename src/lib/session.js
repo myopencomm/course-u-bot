@@ -127,6 +127,16 @@ export async function dismissOverlays(page) {
 }
 
 /** Lit le contexte que le site publie dans window.tc_vars (TagCommander). */
+/**
+ * Lit le contexte une fois tc_vars posé. Le tag analytics le pose après le
+ * rendu : lu trop tôt, une session valide passait pour expirée, et la
+ * connexion échouait faute de formulaire.
+ */
+async function lireContexteStable(page) {
+  await page.waitForFunction(() => window.tc_vars && 'user_logged' in window.tc_vars, { timeout: 10000 }).catch(() => {});
+  return readContext(page);
+}
+
 export async function readContext(page) {
   return page.evaluate(() => {
     const v = window.tc_vars || {};
@@ -245,7 +255,7 @@ export async function ensureLoggedIn(page, { notify } = {}) {
   await page.goto(STORE_URL, { waitUntil: 'domcontentloaded' });
   await acceptCookies(page);
 
-  let ctx = await readContext(page);
+  let ctx = await lireContexteStable(page);
   if (ctx.logged) {
     console.log(`[SESSION] Déjà connecté (magasin ${ctx.storeName || ctx.storeId || '?'}).`);
     return ctx;
@@ -259,6 +269,14 @@ export async function ensureLoggedIn(page, { notify } = {}) {
   await page.goto(LOGIN_URL, { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(1500);
   await acceptCookies(page);
+
+  // Un client connecté est renvoyé de /connexion vers la boutique : la session
+  // était valide, il n'y a pas de formulaire à remplir.
+  ctx = await lireContexteStable(page);
+  if (ctx.logged) {
+    console.log(`[SESSION] Connecté finalement (magasin ${ctx.storeName || ctx.storeId || '?'}).`);
+    return ctx;
+  }
 
   await page.getByRole('textbox', { name: /e-?mail/i }).first().fill(email);
   await page.getByRole('textbox', { name: /mot de passe/i }).first().fill(password);
