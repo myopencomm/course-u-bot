@@ -403,10 +403,26 @@ async function main() {
             continue;
           }
 
+          // Une ligne que l'arbitre a passée sous silence garde ses meilleurs
+          // candidats ; une ligne qu'il a examinée ne garde que ce qu'il juge
+          // plausible, avec la quantité qu'il a calculée pour chaque option.
+          const plausibles = r.plausibles.has(q.index)
+            ? r.plausibles.get(q.index)
+              .map((p) => {
+                const o = q.options.find((x) => x.itemid === p.itemid);
+                return o && { ...o, quantity: p.quantite ?? o.quantity };
+              })
+              .filter(Boolean)
+            : q.options.slice(0, 3);
+
           const d = r.decisions.get(q.index);
           const opt = d && q.options.find((o) => o.itemid === d.itemid);
           const pourquoi = d && `${d.doute ? `${d.doute}, ` : ''}conf ${d.confiance} : ${d.raison}`;
           if (opt && await ajouter(line, opt, d.quantite ?? opt.quantity, `arbitre (${pourquoi})`, opt.name)) {
+            // Gardées pour la relecture : si elle fait retirer ce choix, la
+            // question repart sur ces options-là, pas sur une recherche brute
+            // qui avait remis des madeleines pour « Œuf bio ».
+            line.alternatives = plausibles.filter((o) => o.itemid !== opt.itemid);
             console.log(`  🤖 ${enLog(line)} (${pourquoi})`);
             continue;
           }
@@ -434,17 +450,6 @@ async function main() {
             continue;
           }
 
-          // Une ligne que l'arbitre a passée sous silence garde ses meilleurs
-          // candidats ; une ligne qu'il a examinée ne garde que ce qu'il juge
-          // plausible, avec la quantité qu'il a calculée pour chaque option.
-          const plausibles = r.plausibles.has(q.index)
-            ? r.plausibles.get(q.index)
-              .map((p) => {
-                const o = q.options.find((x) => x.itemid === p.itemid);
-                return o && { ...o, quantity: p.quantite ?? o.quantity };
-              })
-              .filter(Boolean)
-            : q.options.slice(0, 3);
           if (plausibles.length && item.saison) {
             // Une ligne de saison ne pose pas de question : le plus plausible.
             const ok = await ajouter(line, plausibles[0], plausibles[0].quantity, `${item.saison.type} de ${item.saison.mois}`, plausibles[0].name);
@@ -483,7 +488,7 @@ async function main() {
     // La vérification mécanique ci-dessus ne voit que des identifiants ; celle-ci
     // voit le sens (un jus à la place d'un fruit, une quantité aberrante).
     console.log(dryRun ? '\n[SIMULATION] Relecture ignorée (panier non modifié).' : '\n[RELECTURE] Vérification du panier par l\'IA...');
-    const revue = dryRun ? { verdict: 'simulation', anomalies: [] } : await relirePanier({ items, cart });
+    const revue = dryRun ? { verdict: 'simulation', anomalies: [] } : await relirePanier({ items, cart, statuts: bilan.map((l) => l.status) });
     if (revue.verdict === 'ok') console.log('[RELECTURE] Panier conforme à la liste.');
     else if (revue.anomalies.length) revue.anomalies.forEach((a) => console.log(`  ⚠️  ${a}`));
     else console.log(`[RELECTURE] ${revue.verdict}${revue.erreur ? ' : ' + revue.erreur : ''}`);
@@ -514,20 +519,25 @@ async function main() {
           console.log(`  ⚠️  ${item.wanted} : retrait impossible (${r.reason}), laissé au panier.`);
           continue;
         }
-        // Sans nouvel arbitrage, on ne garde que des libellés proches de la
-        // demande : proposer n'importe quoi est précisément ce qu'on corrige.
-        const recherche = contexte(item, { prefs, favorites });
-        const res = await search(page, recherche.requetes[0]);
-        const options = candidats(recherche.classer(res.products), 8)
-          .filter((c) => c.itemid !== retire.itemid && c.nameSim >= 0.5)
-          .slice(0, 3);
+        // Les autres options jugées plausibles par l'arbitre, s'il y en a. Sinon,
+        // sans nouvel arbitrage, seulement des libellés proches de la demande :
+        // proposer n'importe quoi est précisément ce qu'on corrige.
+        let options = (line.alternatives || []).filter((o) => o.itemid !== retire.itemid).slice(0, 3);
+        if (!options.length) {
+          const recherche = contexte(item, { prefs, favorites });
+          const res = await search(page, recherche.requetes[0]);
+          options = candidats(recherche.classer(res.products), 8)
+            .filter((c) => c.itemid !== retire.itemid && c.nameSim >= 0.7 && c.catMatch !== false)
+            .slice(0, 3)
+            .map((o) => versOption(o, item.quantity));
+        }
         line.pick = null;
         line.addedQuantity = null;
-        if (options.length) poser(line, options.map((o) => versOption(o, item.quantity)));
+        if (options.length) poser(line, options, a.probleme);
         else line.status = 'not_found';
         line.reason = `retiré après relecture : ${a.probleme}`;
-        corrections.push(`${retire.name.slice(0, 46)} retiré — ${a.probleme}`);
-        console.log(`  🔧 ${item.wanted} : ${retire.name.slice(0, 46)} retiré, ${options.length ? 'question posée' : 'aucune autre option'}.`);
+        corrections.push(`${retire.name.slice(0, 60)} retiré — ${a.probleme}`);
+        console.log(`  🔧 ${item.wanted} : ${retire.name.slice(0, 60)} retiré, ${options.length ? 'question posée' : 'aucune autre option'}.`);
       }
       if (corrections.length) {
         // Le panier a changé : le bilan doit décrire le panier réel.

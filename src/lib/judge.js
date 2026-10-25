@@ -351,10 +351,14 @@ export async function arbitrer(questions) {
  * Relecture finale : le panier reel correspond-il a la liste ?
  * Renvoie un verdict lisible, destine au bilan Telegram.
  */
-export async function relirePanier({ items, cart }) {
+export async function relirePanier({ items, cart, statuts = [] }) {
+  // Une ligne en attente de réponse ou introuvable est absente par construction :
+  // la signaler répétait les questions du bilan.
+  const ECARTEES = { question: 'en attente de reponse', not_found: 'introuvable' };
   const liste = items.map((i, k) => {
     const sens = i.plan && normalize(i.plan.produit) !== normalize(i.wanted) ? ` = ${i.plan.produit}` : '';
-    return `${k + 1}. ${i.wanted}${sens} (x${i.quantity})`;
+    const ecart = ECARTEES[statuts[k]] ? ` [${ECARTEES[statuts[k]]}, absence normale]` : '';
+    return `${k + 1}. ${i.wanted}${sens} (x${i.quantity})${ecart}`;
   }).join('\n');
   const panier = cart.items.length
     ? cart.items.map((i) => `- ${i.name || i.itemid} (x${i.quantity})`).join('\n')
@@ -373,6 +377,7 @@ export async function relirePanier({ items, cart }) {
     'ligne est le numero de la ligne de liste concernee, null pour un article present non demande.',
     'Signale: article demande absent, article present non demande, quantite douteuse,',
     'produit manifestement hors sujet (jus au lieu du fruit, aromatise au lieu de nature).',
+    'Une ligne marquee "absence normale" ne se signale pas comme absente.',
     'N invente pas de probleme: si tout correspond, verdict "ok" et anomalies vide.',
   ].join('\n');
 
