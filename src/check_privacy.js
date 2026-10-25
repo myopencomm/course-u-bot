@@ -45,7 +45,7 @@ const MOTIFS = [
   { nom: 'code de connexion à 8 chiffres', re: /\b\d{8}\b/g, sauf: /12345678|0{4,}$/ },
   { nom: 'numéro de commande', re: /\bN[°ºo]\s*\d{7,9}\b/gi },
   { nom: 'identifiant Telegram', re: /\b-?\d{9,12}\b/g, sauf: /1234567890|^\d{1,8}$/ },
-  { nom: 'chemin personnel', re: /\/Users\/(?!votre-nom|utilisateur)[a-z0-9_.-]+\//gi },
+  { nom: 'chemin personnel', re: /\/Users\/(?!votre[-_]nom|utilisateur)[a-z0-9_.-]+\//gi },
 ];
 
 function fichiersSuivis(tout) {

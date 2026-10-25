@@ -41,7 +41,8 @@ export function stripAccents(s) {
 
 /** Forme canonique : minuscules, sans accents, sans ponctuation. */
 export function normalize(s) {
-  return stripAccents(String(s || '').toLowerCase())
+  // Les ligatures ne se décomposent pas : sans ce remplacement, « Œuf » devenait « uf ».
+  return stripAccents(String(s || '').toLowerCase().replace(/œ/g, 'oe').replace(/æ/g, 'ae'))
     .replace(/[^a-z0-9]+/g, ' ')
     .trim()
     .replace(/\s+/g, ' ');
@@ -71,6 +72,9 @@ function nearlyEqual(a, b) {
   if (a === b) return true;
   if (Math.abs(a.length - b.length) > 1) return false;
   if (a.length < 5 || b.length < 5) return false;
+  // Pluriels et variantes partagent leur première lettre ; « poires » et
+  // « noires », non. Sans ça, « poires » trouvait des olives noires.
+  if (a[0] !== b[0]) return false;
   let i = 0, j = 0, edits = 0;
   while (i < a.length && j < b.length) {
     if (a[i] === b[j]) { i++; j++; continue; }

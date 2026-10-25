@@ -26,14 +26,22 @@ Vinaigre du vin               →     Vinaigre de vin vieux MAILLE    2,47 €
 
 - **Comprendre une liste écrite normalement.** « Kiwi gold 5 » = 5 kiwis.
   « tomates cerises 500 g » = une barquette de 500 g, pas 500 tomates.
-  « Disques le chat 4 en 1 » n'est pas une quantité.
+  « Disques le chat 4 en 1 » n'est pas une quantité. « Poire x4 » et une
+  barquette de 4 poires : une barquette, pas quatre.
+- **Chercher comme vous le feriez.** Avec une IA en ligne de commande, chaque
+  ligne est traduite en recherche française avant d'interroger le site :
+  « Red onion » → oignon rouge, « Salt » → sel fin, « Carrottes » → carottes.
+  L'IA choisit ensuite parmi les résultats ; rien n'entre au panier sans elle.
 - **Se souvenir de ce que vous achetez.** Il apprend de vos commandes passées et
   reprend vos références habituelles plutôt qu'un produit au hasard.
 - **Parler votre langue de famille.** « quick milk » veut dire quelque chose de
   précis chez vous ? Apprenez-le-lui une fois, il s'en souviendra.
 - **Choisir pour vous quand c'est évident.** « légumes de saison » devient trois
   légumes du mois, choisis parmi ceux que vous prenez d'habitude.
-- **Demander quand ce n'est pas évident**, plutôt que de se tromper en silence.
+- **Demander quand ce n'est pas évident**, plutôt que de se tromper en silence —
+  et seulement avec des options qui ont du sens. Plusieurs miels conviennent ?
+  Il prend le plus courant. Pas de lardons bio, seulement du surgelé, un format
+  très différent ? Là, il demande.
 - **Se relire.** Après remplissage, il compare le panier réel à votre liste et
   signale ce qui cloche.
 - **Se lancer depuis Telegram**, pour que toute la famille puisse déclencher les

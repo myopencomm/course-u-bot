@@ -45,7 +45,8 @@ async function main() {
       // Il faut revenir sur une page de résultats pour disposer d'une tuile cliquable.
       const res = await search(page, option.name);
       rank(res.products, { wanted: q.wanted, prefs });
-      const r = await addFromSearch(page, option.itemid, q.quantity || 1);
+      // L'option porte sa propre quantité : une barquette de 4 pour « Poire x4 », pas 4.
+      const r = await addFromSearch(page, option.itemid, option.quantity || q.quantity || 1);
       done.push({ ...q, result: r.ok ? `ajouté : ${option.name}` : `échec : ${r.reason}` });
       console.log(`  ${r.ok ? '✅' : '⚠️'} ${q.wanted} -> ${option.name.slice(0, 50)}`);
     }

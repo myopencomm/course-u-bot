@@ -88,6 +88,15 @@ export function parseLine(raw) {
 
   for (let i = 0; i < words.length; i++) {
     const w = words[i];
+
+    // Formes collées. « x500g », « 500g » : une taille. « x4 », « 4x » : une
+    // quantité. Laissées dans le libellé, elles partaient telles quelles dans
+    // la recherche (« Aubergine x2 » ramenait une galette aux aubergines).
+    const taille = w.match(/^[x×]?(\d+(?:[.,]\d+)?)(g|kg|mg|l|cl|ml|dl)$/i);
+    if (taille) { sizeHint = `${taille[1]} ${taille[2].toLowerCase()}`; words.splice(i, 1); i -= 1; continue; }
+    const fois = w.match(/^(?:[x×](\d+)|(\d+)[x×])$/i);
+    if (fois) { quantity = Number(fois[1] || fois[2]); words.splice(i, 1); i -= 1; continue; }
+
     const num = w.match(/^(\d+)$/);
     if (!num) continue;
     const n = Number(num[1]);

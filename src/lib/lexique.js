@@ -118,10 +118,11 @@ function appliquerSaison(ligne, { prefs, date, dejaPris }) {
 /**
  * Applique vocabulaire et saison à une liste de lignes.
  * Retourne les lignes développées, plus un journal des traductions faites.
+ * `exclure` : produits déjà dans la liste par ailleurs, à ne pas proposer en saison.
  */
-export function developper(lignes, { prefs, date = new Date() } = {}) {
+export function developper(lignes, { prefs, date = new Date(), exclure = [] } = {}) {
   const lexique = chargerLexique();
-  const dejaPris = new Set(lignes.map((l) => normalize(l.wanted)));
+  const dejaPris = new Set([...lignes.map((l) => l.wanted), ...exclure].map((w) => normalize(w)));
   const sorties = [];
   const journal = [];
 

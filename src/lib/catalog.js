@@ -8,7 +8,17 @@
 
 import { SEARCH_URL } from './paths.js';
 import { acceptCookies, dismissOverlays } from './session.js';
-import { similarity, normalize } from './normalize.js';
+import { similarity, normalize, estBio } from './normalize.js';
+
+// Rayons de premier niveau du site (product_cat1), relevés sur les résultats.
+// « Bio » existe aussi comme rayon, mais c'est un label transversal : un
+// produit bio peut y être rangé quelle que soit sa nature.
+export const RAYONS = [
+  'Fruits et Légumes', 'Viandes, poissons', 'Charcuterie, traiteur',
+  'Produits laitiers, oeufs et fromages', 'Epicerie salée', 'Epicerie sucrée',
+  'Surgelés', 'Boissons sans alcool', 'Bières, vins, alcools', 'Hygiène et beauté',
+  'Entretien et nettoyage', 'Univers bébé', 'Animalerie',
+];
 
 /** Récupère les produits structurés de la page de résultats courante. */
 async function readProducts(page) {
@@ -70,8 +80,10 @@ export async function search(page, query) {
  * Classe les candidats pour une ligne de liste de courses.
  * Le score mêle quatre signaux, l'historique dominant volontairement le reste :
  * un produit déjà acheté plusieurs fois est presque toujours le bon.
+ * `rayonIndicatif` : le rayon attendu est une supposition (celle de l'IA), il
+ * départage sans écarter.
  */
-export function rank(candidates, { wanted, prefs, expectedCat1 = null }) {
+export function rank(candidates, { wanted, prefs, expectedCat1 = null, rayonIndicatif = false }) {
   const products = prefs?.products || {};
   // Marques réellement achetées, pour départager deux produits équivalents.
   const brandScore = {};
@@ -83,7 +95,10 @@ export function rank(candidates, { wanted, prefs, expectedCat1 = null }) {
   return candidates
     .map((c) => {
       const hist = products[c.itemid];
-      const nameSim = similarity(wanted, c.name);
+      // Le site écrit souvent « bio » dans la marque (U BIO) et non dans le
+      // nom : l'exigence bio se vérifie sur les deux.
+      const bioOk = !estBio(wanted) || estBio(`${c.name} ${c.brand || ''}`);
+      const nameSim = similarity(wanted, c.name, { bio: false }) * (bioOk ? 1 : 0.5);
       // Pas de plancher : un produit acheté UNE fois ne doit pas peser autant
       // qu'un habituel. Avec un plancher à 0,5, un balsamique acheté une seule
       // fois battait un « vinaigre de vin » pourtant bien mieux nommé.
@@ -96,9 +111,16 @@ export function rank(candidates, { wanted, prefs, expectedCat1 = null }) {
       // mots demandés sont présents dans les deux. Le rayon, lui, tranche — et
       // on le déduit du produit que l'utilisateur achète réellement, pas d'une liste
       // de mots écrite à la main.
+      // Un rayon deviné pèse moins : le site range parfois un produit ailleurs
+      // qu'on ne l'attend (le paprika en fruits et légumes).
       let catAdjust = 0;
+      let catMatch = expectedCat1 ? false : null;
       if (expectedCat1 && c.cat1) {
-        catAdjust = normalize(c.cat1) === normalize(expectedCat1) ? 0.18 : -0.45;
+        if (normalize(c.cat1) === 'bio') catMatch = null;
+        else {
+          catMatch = normalize(c.cat1) === normalize(expectedCat1);
+          catAdjust = rayonIndicatif ? (catMatch ? 0.10 : -0.15) : (catMatch ? 0.18 : -0.45);
+        }
       }
 
       const score =
@@ -116,7 +138,7 @@ export function rank(candidates, { wanted, prefs, expectedCat1 = null }) {
         inHistory: Boolean(hist),
         historyCount: hist?.count || 0,
         nameSim: Number(nameSim.toFixed(3)),
-        catMatch: expectedCat1 ? catAdjust > 0 : null,
+        catMatch,
       };
     })
     .sort((a, b) => b.score - a.score);
@@ -131,7 +153,8 @@ export function rank(candidates, { wanted, prefs, expectedCat1 = null }) {
 function dedoublonner(liste) {
   const par = new Map();
   for (const c of liste) {
-    const cle = normalize(c.name);
+    // La marque fait partie de la clé : « Lardons fumés - 2x75g » existe en U et en U BIO.
+    const cle = normalize(`${c.name} ${c.brand || ''}`);
     const garde = par.get(cle);
     if (!garde) { par.set(cle, c); continue; }
     const prixA = c.price ?? Infinity;
@@ -141,20 +164,41 @@ function dedoublonner(liste) {
   return [...par.values()].sort((a, b) => b.score - a.score);
 }
 
+/** Les `n` meilleurs candidats commandables, sans doublon catalogue. */
+export function candidats(ranked, n = 3) {
+  return dedoublonner(ranked.filter((c) => c.addable)).slice(0, n);
+}
+
+/**
+ * Nombre d'exemplaires d'un produit pour couvrir `voulu` unités : pour
+ * « Poire x4 » et une barquette de 4 fruits, une barquette et non quatre.
+ * Sans conditionnement lisible dans le libellé, on garde `voulu`.
+ */
+export function quantitePour(nom, voulu = 1) {
+  if (!(voulu > 1)) return 1;
+  const n = normalize(nom);
+  const m = n.match(/(?:^| )x ?(\d{1,2})(?: |$)/)                        // « x6 », « x 12 »
+    || n.match(/(?:^| )(\d{1,2}) ?x ?\d/)                                 // « 4x125g »
+    || n.match(/(?:^| )(\d{1,2}) (?:fruits?|pieces?|pcs|oeufs?|unites?)(?: |$)/)
+    || n.match(/(?:barquette|filet|lot|sachet|boite|pack|plateau) (?:de )?(\d{1,2})(?: |$)/);
+  const lot = m ? Number(m[1]) : 1;
+  return lot > 1 ? Math.max(1, Math.round(voulu / lot)) : voulu;
+}
+
 /**
  * Décide : achat direct, question à poser, ou introuvable.
  * Les seuils sont volontairement prudents — une erreur de panier coûte plus cher
- * qu'une question.
+ * qu'une question. `sur` marque un choix fondé sur l'historique d'achat.
  */
 export function decide(ranked, { wanted }) {
-  const usable = dedoublonner(ranked.filter((c) => c.addable));
+  const usable = candidats(ranked, Infinity);
   if (!usable.length) return { action: 'not_found', wanted, options: ranked.slice(0, 3) };
 
   const [best, second] = usable;
 
   // Déjà acheté et le libellé colle : aucun doute.
   if (best.inHistory && best.historyCount >= 2 && best.nameSim >= 0.55) {
-    return { action: 'add', pick: best, reason: `acheté ${best.historyCount}x` };
+    return { action: 'add', pick: best, reason: `acheté ${best.historyCount}x`, sur: true };
   }
   // Bon libellé, bon rayon, et nettement devant le suivant.
   const margin = second ? best.score - second.score : 1;

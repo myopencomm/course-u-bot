@@ -19,10 +19,17 @@ Déclencheurs : « fais les courses », « prépare le panier », « Make my sho
 cd INSTALL_DIR && npm run prepare-cart
 ```
 
-Le programme lit la section de courses dans la note Apple, résout chaque ligne
-(historique d'achats d'abord, puis recherche catalogue, puis arbitrage par une
-IA en ligne de commande), remplit le panier, **relit le panier pour vérifier ce
-qui s'y trouve vraiment**, puis envoie le bilan et les éventuelles questions.
+Le programme lit la section de courses dans la note Apple, la fait interpréter
+par une IA en ligne de commande (anglais, fautes, « x4 » → requêtes françaises
+pour le site), cherche chaque ligne, fait choisir le produit par l'IA parmi les
+résultats et l'historique d'achats, remplit le panier, **relit le panier pour
+vérifier ce qui s'y trouve vraiment**, puis envoie le bilan et les éventuelles
+questions. Un run complet prend 4 à 6 minutes : ne pas l'interrompre.
+
+Les questions envoyées ne portent que sur de vrais doutes (pas de version bio,
+seulement du surgelé, format très différent), et leurs options sont toutes
+plausibles : les relayer telles quelles, sans les commenter ni les trier. Les
+lignes introuvables sont listées avec ce qui a été cherché.
 
 Avant de lire la note, il attend qu'iCloud ait livré les dernières
 modifications (jusqu'à 2 min si Notes était fermé) : ne pas l'interrompre. Le
@@ -121,4 +128,5 @@ runs : ne pas le fermer, ne pas basculer sur un navigateur piloté.
 ## Règle de conduite
 
 Confirmer brièvement, lancer la commande sans demander d'autorisation, relayer
-le bilan et les questions. Ne pas modifier les scripts en passant.
+le bilan et les questions tels que le programme les envoie. Ne pas modifier les
+scripts en passant.

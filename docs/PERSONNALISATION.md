@@ -72,13 +72,31 @@ modifiez-le. Les listes sont ordonnées du plus courant au plus spécifique.
 
 ## L'arbitrage par une IA
 
-Sans lui, le bot fonctionne mais pose nettement plus de questions. Avec lui, sur
-une liste type, on passe de **quatre questions à zéro**.
+Sans lui, le bot fonctionne mais cherche chaque ligne mot à mot et pose
+nettement plus de questions. Sur une liste réelle de 36 lignes, mi-français
+mi-anglais : **15 questions sans IA, 2 avec**.
 
-Il ne remplace pas les règles : il n'intervient que sur ce qu'elles n'ont pas su
-trancher. Il sait par exemple qu'un vinaigre « à l'estragon » est aromatisé alors
-qu'un « vieux » ne l'est pas, ou que deux libellés identiques sont un doublon
-catalogue à départager par le prix.
+Il intervient à trois moments, chaque fois en un seul appel pour toute la liste :
+
+1. **Interpréter** la liste avant toute recherche : anglais, fautes, abréviations
+   deviennent des requêtes françaises (« Lamb mince » → viande hachée d'agneau),
+   avec le rayon attendu. Une ligne de saison mal écrite (« Seconal fruits ») est
+   reconnue et développée comme les autres.
+2. **Choisir** parmi les produits trouvés. Il voit le nom, la marque, le rayon,
+   le prix, la note et vos achats passés. Il sait qu'un oignon rouge n'est pas
+   un Red Bull, qu'un vinaigre « à l'estragon » est aromatisé, que « U BIO » est
+   bio. Il calcule aussi la quantité : 12 œufs, ce sont 2 boîtes de 6.
+3. **Relire** le panier final et retirer ce qui ne correspond pas à la liste.
+
+Avec lui, **rien n'entre au panier sans son accord**, pas même un produit déjà
+acheté (seules les références épinglées dans votre vocabulaire passent
+directement). Votre historique reste un argument : à qualité égale, il reprend
+ce que vous achetez.
+
+Il ne vous pose une question qu'en cas de vrai doute : qualificatif demandé
+introuvable (bio, fumé…), format très différent (2,5 kg pour 500 g demandés),
+nature du produit incertaine. Avant de demander, il relance la recherche avec
+d'autres termes. Les options proposées sont toutes plausibles.
 
 **Le programme ne dépend d'aucun fournisseur.** Il lance la commande que vous
 choisissez. Préréglages fournis :
@@ -99,9 +117,13 @@ JUDGE_MODEL=llama3.1
 JUDGE_THRESHOLD=0.8
 ```
 
-`JUDGE_THRESHOLD` est le niveau de confiance au-dessus duquel le bot décide seul.
-En dessous, la question vous revient. Baissez-le si vous voulez moins de
-questions, montez-le si vous préférez garder la main.
+Le préréglage `claude` lance le CLI sans outils ni serveurs MCP et avec son
+propre prompt système : un appel coûte moins d'un centime et prend 5 à 30 s.
+`JUDGE_MODEL` vaut `sonnet` par défaut, l'alias de la dernière version.
+
+`JUDGE_THRESHOLD` ne sert qu'aux CLI qui ne renseignent pas le champ « doute » de
+la réponse : c'est alors le niveau de confiance au-dessus duquel le bot décide
+seul. `JUDGE_TIMEOUT_MS` (180 000 par défaut) borne la durée d'un appel.
 
 **Un autre CLI ?** Décrivez-le vous-même :
 
@@ -114,8 +136,8 @@ JUDGE_OUTPUT=texte
 Les marqueurs `{prompt}`, `{system}` et `{model}` sont remplacés à l'appel. Avec
 `JUDGE_OUTPUT=json`, `JUDGE_RESULT_KEY` indique la clé contenant la réponse.
 
-**Pour vous en passer :** `JUDGE_ENABLED=false`. Le bot posera les questions
-lui-même.
+**Pour vous en passer :** `JUDGE_ENABLED=false`. Le bot cherchera chaque ligne
+telle qu'écrite et posera les questions lui-même.
 
 ---
 
