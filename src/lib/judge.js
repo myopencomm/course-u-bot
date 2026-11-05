@@ -109,7 +109,7 @@ const CONSIGNE_CHOIX = [
   '1. la nature du produit: le produit lui-meme, pas un produit qui en contient ou en a le gout (oignon rouge != Red Bull, sel != beurre sale ni chips au sel, lardons != lardons de saumon). Le fruit ou le legume frais plutot que le jus, le sirop, la conserve ou le surgele, sauf si la ligne demande le derive;',
   '2. les qualificatifs demandes: vert != jaune, rouge != blanc, fume, complet, bio si la ligne dit bio;',
   '3. la version nature ou classique prime sur une version aromatisee ou preparee, sauf demande contraire;',
-  '4. a qualite egale, preferer ce qui est deja achete, puis le format courant au meilleur prix.',
+  '4. a qualite egale, preferer ce qui est deja achete ou dans Mes produits du compte (la liste des achats habituels), puis le format courant au meilleur prix.',
   '- itemid: ton choix si une option respecte 1 et 2, sinon null. Un bon produit manquant vaut mieux qu un mauvais au panier, l utilisateur choisira.',
   '- doute: "aucun" si une seule option correspond clairement;',
   '  "preference" si plusieurs conviennent (plusieurs miels, plusieurs riz) et que ton choix est un defaut raisonnable (deja achete, le plus courant, le meilleur prix): la personne ne s en plaindrait pas, le bot le prendra;',
@@ -245,7 +245,7 @@ function verifierChoix(q, itemid) {
 /**
  * Arbitre les lignes que les règles ne suffisent pas à trancher.
  * @param {Array} questions  [{ index, wanted, produit, quantity, sizeHint, expectedCat1, rayonCertain,
- *                              options:[{itemid,name,brand,price,rating,cat1,cat2,historyCount,inCart}] }]
+ *                              options:[{itemid,name,brand,price,rating,cat1,cat2,historyCount,mesProduits,inCart}] }]
  * @returns {{ decisions: Map<number,{itemid,confiance,doute,raison,quantite}>,
  *             plausibles: Map<number,{itemid,quantite}[]>, relances: Map<number,string>,
  *             raisons: Map<number,string>, meta }}
@@ -266,7 +266,7 @@ export async function arbitrer(questions) {
         [o.cat1, o.cat2].filter(Boolean).join(' > ') || '?',
         o.price != null ? `${o.price} €` : 'prix ?',
         o.rating != null ? `note ${o.rating}` : 'note ?',
-        `achete ${o.historyCount || 0}x${o.inCart ? ', deja au panier' : ''}`,
+        `achete ${o.historyCount || 0}x${o.mesProduits ? ', dans Mes produits du compte' : ''}${o.inCart ? ', deja au panier' : ''}`,
       ];
       return `  ${'abcdefghijklmnop'[i]}) ${bits.join(' | ')}`;
     }).join('\n');

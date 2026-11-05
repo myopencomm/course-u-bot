@@ -33,7 +33,11 @@ Vinaigre du vin               →     Vinaigre de vin vieux MAILLE    2,47 €
   « Red onion » → oignon rouge, « Salt » → sel fin, « Carrottes » → carottes.
   L'IA choisit ensuite parmi les résultats ; rien n'entre au panier sans elle.
 - **Se souvenir de ce que vous achetez.** Il apprend de vos commandes passées et
-  reprend vos références habituelles plutôt qu'un produit au hasard.
+  reprend vos références habituelles plutôt qu'un produit au hasard. À chaque
+  run, il parcourt d'abord toute votre liste « Mes produits » du site (en la
+  faisant défiler jusqu'au bout) avant de chercher dans le catalogue entier.
+  Si l'adresse de cette page change, il la retrouve par le menu « Mes achats
+  récents » / « Mes produits ».
 - **Parler votre langue de famille.** « quick milk » veut dire quelque chose de
   précis chez vous ? Apprenez-le-lui une fois, il s'en souviendra.
 - **Choisir pour vous quand c'est évident.** « légumes de saison » devient trois

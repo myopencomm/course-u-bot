@@ -83,8 +83,10 @@ export async function search(page, query) {
  * `rayonIndicatif` : le rayon attendu est une supposition (celle de l'IA), il
  * départage sans écarter.
  */
-export function rank(candidates, { wanted, prefs, expectedCat1 = null, rayonIndicatif = false }) {
+export function rank(candidates, { wanted, prefs, expectedCat1 = null, rayonIndicatif = false, mesProduits = null }) {
   const products = prefs?.products || {};
+  // itemid -> rang dans la liste « Mes produits » du compte.
+  const liste = mesProduits instanceof Map ? mesProduits : new Map();
   // Marques réellement achetées, pour départager deux produits équivalents.
   const brandScore = {};
   for (const p of Object.values(products)) {
@@ -105,6 +107,10 @@ export function rank(candidates, { wanted, prefs, expectedCat1 = null, rayonIndi
       const histScore = hist ? Math.min(1, hist.confidence) : 0;
       const ratingScore = c.rating ? (c.rating - 3) / 2 : 0; // 3/5 neutre, 5/5 = +1
       const brandBoost = brandScore[normalize(c.brand).split(' ')[0]] ? 0.08 : 0;
+      // Dans « Mes produits » : déjà acheté par le compte, même si l'historique
+      // local ne l'a pas vu passer.
+      const rangListe = liste.get(c.itemid) || null;
+      const listeBoost = rangListe ? 0.12 : 0;
 
       // Cohérence de rayon. Le texte seul ne distingue pas « Banane Cavendish »
       // de « Banana bread », ni « Citron vert » d'un thon au citron vert : les
@@ -128,6 +134,7 @@ export function rank(candidates, { wanted, prefs, expectedCat1 = null, rayonIndi
         0.42 * nameSim +
         0.08 * Math.max(0, Math.min(1, ratingScore)) +
         brandBoost +
+        listeBoost +
         catAdjust -
         (c.addable ? 0 : 0.40) -
         (c.available ? 0 : 0.25);
@@ -137,6 +144,7 @@ export function rank(candidates, { wanted, prefs, expectedCat1 = null, rayonIndi
         score: Number(score.toFixed(4)),
         inHistory: Boolean(hist),
         historyCount: hist?.count || 0,
+        dansMesProduits: Boolean(rangListe),
         nameSim: Number(nameSim.toFixed(3)),
         catMatch,
       };

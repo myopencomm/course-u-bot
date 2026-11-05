@@ -18,13 +18,14 @@ import { sendTelegram } from './lib/telegram.js';
 import { similarity, normalize } from './lib/normalize.js';
 import { planifier, arbitrer, relirePanier } from './lib/judge.js';
 import { developper } from './lib/lexique.js';
+import { lireMesProduits } from './lib/mes_produits.js';
 import path from 'path';
 
 /** Option de question, telle qu'enregistrée dans questions.v2.json. */
 function versOption(o, voulu = 1) {
   return {
     itemid: o.itemid, name: o.name, brand: o.brand, price: o.price,
-    rating: o.rating, cat1: o.cat1, cat2: o.cat2, historyCount: o.historyCount, inCart: o.inCart,
+    rating: o.rating, cat1: o.cat1, cat2: o.cat2, historyCount: o.historyCount, mesProduits: o.dansMesProduits || false, inCart: o.inCart,
     // Exemplaires à ajouter si l'option est retenue : une barquette, pas quatre, pour « Poire x4 ».
     quantity: quantitePour(o.name, voulu),
   };
@@ -97,7 +98,7 @@ function rayonsConnus(favorites, prefs) {
  * c'est « sel fin » qu'on compare aux libellés, pas « Salt » — qui rapprochait
  * un beurre aux cristaux de sel déjà acheté.
  */
-function contexte(item, { prefs, favorites }) {
+function contexte(item, { prefs, favorites, rangs = null }) {
   const plan = item.plan || null;
   const cible = plan?.produit || item.wanted;
   // Une ligne issue de l'expansion saisonnière est un produit frais par
@@ -114,8 +115,22 @@ function contexte(item, { prefs, favorites }) {
     rayon,
     rayonCertain,
     requetes: plan?.requetes?.length ? plan.requetes : [item.wanted],
-    classer: (produits) => rank(produits, { wanted: cible, prefs, expectedCat1: rayon, rayonIndicatif: !rayonCertain }),
+    classer: (produits) => rank(produits, { wanted: cible, prefs, expectedCat1: rayon, rayonIndicatif: !rayonCertain, mesProduits: rangs }),
   };
+}
+
+/**
+ * Produits de la liste « Mes produits » du compte qui ressemblent à la ligne,
+ * le plus proche d'abord. On compare l'interprétation (« sel fin ») autant que
+ * le texte écrit (« Salt ») : l'un ou l'autre peut seul trouver le produit.
+ */
+function dansLaListe(recherche, item, liste, seuil = 0.7) {
+  const out = [];
+  for (const p of liste) {
+    const sim = Math.max(similarity(recherche.cible, p.name), similarity(item.wanted, p.name));
+    if (sim >= seuil) out.push({ produit: p, sim });
+  }
+  return out.sort((a, b) => b.sim - a.sim || (a.produit.rang || 999) - (b.produit.rang || 999));
 }
 
 /**
@@ -177,7 +192,10 @@ async function main() {
   console.log(`[LISTE] ${items.length} lignes à traiter.`);
 
   const prefs = loadJson(PREFS_PATH, { products: {} });
-  const favorites = loadJson(path.join(DATA_DIR, 'achats_recents.json'), { products: [] }).products;
+  // Copie de la dernière lecture de « Mes produits » : sert à l'interprétation,
+  // avant l'ouverture du navigateur. La liste est relue en ligne juste après.
+  let favorites = loadJson(path.join(DATA_DIR, 'achats_recents.json'), { products: [] }).products;
+  let rangs = new Map();
 
   // Vocabulaire maison et produits de saison, appliqués avant tout rapprochement.
   const { lignes: items2, journal } = developper(items, { prefs });
@@ -260,6 +278,13 @@ async function main() {
       const ctx = await ensureLoggedIn(page, { notify: sendTelegram });
       console.log(`[PANIER] Magasin ${ctx.storeName}, panier ${ctx.basketId}.`);
 
+      // Avant toute recherche dans le catalogue : la liste complète des produits
+      // du compte (« Mes produits » / « Mes achats récents »), défilée jusqu'au bout.
+      const mesProduits = await lireMesProduits(page);
+      if (mesProduits.products.length) favorites = mesProduits.products;
+      rangs = new Map(favorites.map((p, k) => [p.itemid, p.rang || k + 1]));
+      console.log('');
+
       const aArbitrer = [];
       for (const item of items) {
         const line = { ...item, status: null, pick: null, reason: null };
@@ -278,38 +303,57 @@ async function main() {
           console.log(`  ⚠️  ${item.wanted} : référence épinglée ${item.pinnedItemId} introuvable, recherche normale.`);
         }
 
-        const recherche = contexte(item, { prefs, favorites });
+        const recherche = contexte(item, { prefs, favorites, rangs });
         const requete = recherche.requetes[0];
+        // 1. D'abord la liste « Mes produits » du compte. Le site n'ajoute au
+        // panier que depuis une page de résultats : on cherche le libellé exact
+        // du produit de la liste pour en obtenir la tuile.
+        const connus = dansLaListe(recherche, item, favorites).slice(0, 2);
+        const depuisListe = [];
+        for (const { produit } of connus) {
+          const r = await search(page, produit.name);
+          depuisListe.push(...r.products.filter((c) => c.itemid === produit.itemid));
+        }
+        if (connus.length) {
+          console.log(`  📋 ${item.wanted} : dans Mes produits → ${connus.map((c) => c.produit.name.slice(0, 40)).join(' · ')}`);
+        }
         // Produit déjà acheté qui ressemble à la ligne — ou à son interprétation :
         // c'est « sel fin » qu'on rapproche de l'historique, pas « Salt ».
         const fav = matchConnu(recherche.cible, prefs);
 
         if (ia) {
-          // 1. Avec l'IA, rien ne part au panier sans l'arbitre, pas même un
+          // Avec l'IA, rien ne part au panier sans l'arbitre, pas même un
           // produit déjà acheté. Sur le libellé seul, « Salt » donnait un beurre
           // aux cristaux de sel acheté avant, « Lamb mince » de la viande hachée
           // de bœuf achetée 4 fois, « Riz noir » une galette de riz au chocolat
           // noir. L'historique reste un argument : le produit acheté rejoint les
           // candidats, avec le nombre d'achats, et l'arbitre le préfère à
           // qualité égale.
+          // 2. Puis le catalogue entier, pour que l'arbitre compare.
           const res = await search(page, requete);
-          let produits = res.products;
+          let produits = [...depuisListe, ...res.products.filter((c) => !depuisListe.some((d) => d.itemid === c.itemid))];
           if (fav && !produits.some((c) => c.itemid === fav.product.itemid)) {
             const res2 = await search(page, fav.product.name);
             produits = [...produits, ...res2.products.filter((c) => c.itemid === fav.product.itemid)];
           }
           const ranked = recherche.classer(produits);
           line.status = 'question';
-          aArbitrer.push({ line, item, recherche, ranked, regle: regleDe(item, ranked, fav, recherche), requetes: [requete] });
+          aArbitrer.push({ line, item, recherche, ranked, regle: regleDe(item, ranked, fav, recherche), requetes: [requete], prioritaires: depuisListe.map((c) => c.itemid) });
           console.log(`  🔎 ${item.wanted}${normalize(requete) !== normalize(item.wanted) ? ` (« ${requete} »)` : ''} : ${pourArbitre(ranked).length} candidat(s) pour l'arbitre.`);
           bilan.push(line);
           continue;
         }
 
-        // 1. Sans IA : raccourci par le corpus connu.
+        // Sans IA : un produit de « Mes produits » au libellé très proche part au panier.
         let ranked = null;
         let decision = null;
-        if (fav) {
+        if (depuisListe.length && connus[0].sim >= 0.8) {
+          ranked = recherche.classer(depuisListe);
+          const pick = ranked.find((c) => c.addable && c.catMatch !== false);
+          if (pick) decision = { action: 'add', pick, reason: 'dans Mes produits', requete: pick.name };
+        }
+        // Puis raccourci par l'historique de commandes.
+        if (!decision && fav) {
           // On passe quand même par la recherche pour obtenir une tuile cliquable.
           const res = await search(page, fav.product.name);
           ranked = recherche.classer(res.products);
@@ -330,7 +374,7 @@ async function main() {
           line.status = 'question';
           aArbitrer.push({ line, item, recherche, ranked, regle: decision, requetes: [requete] });
         } else if (decision.action === 'add') {
-          const ok = await ajouter(line, decision.pick, quantitePour(decision.pick.name, item.quantity), decision.reason);
+          const ok = await ajouter(line, decision.pick, quantitePour(decision.pick.name, item.quantity), decision.reason, decision.requete || null);
           console.log(`  ${ok ? '✅' : '⚠️'} ${enLog(line)} (${decision.reason})`);
         } else {
           line.status = 'not_found';
@@ -524,7 +568,7 @@ async function main() {
         // proposer n'importe quoi est précisément ce qu'on corrige.
         let options = (line.alternatives || []).filter((o) => o.itemid !== retire.itemid).slice(0, 3);
         if (!options.length) {
-          const recherche = contexte(item, { prefs, favorites });
+          const recherche = contexte(item, { prefs, favorites, rangs });
           const res = await search(page, recherche.requetes[0]);
           options = candidats(recherche.classer(res.products), 8)
             .filter((c) => c.itemid !== retire.itemid && c.nameSim >= 0.7 && c.catMatch !== false)

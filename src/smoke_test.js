@@ -19,7 +19,7 @@ const essai = async (nom, fn) => {
 console.log('\nTest de fumée — aucune connexion au site\n');
 
 await essai('les modules se chargent', async () => {
-  for (const m of ['paths', 'normalize', 'notes', 'lexique', 'catalog', 'cart', 'judge', 'otp', 'telegram', 'session']) {
+  for (const m of ['paths', 'normalize', 'notes', 'lexique', 'catalog', 'cart', 'judge', 'otp', 'telegram', 'session', 'mes_produits']) {
     await import(`./lib/${m}.js`);
   }
 });
@@ -83,6 +83,19 @@ await essai('classement et décision', async () => {
   const r = rank(c, { wanted: 'Banana', prefs: { products: {} }, expectedCat1: 'Fruits et Légumes' });
   assert.equal(r[0].itemid, '1', 'le rayon doit départager');
   assert(decide(r, { wanted: 'Banana' }).action, 'décision absente');
+});
+
+await essai('Mes produits : un produit de la liste passe devant', async () => {
+  const { rank } = await import('./lib/catalog.js');
+  const c = [
+    { itemid: '1', name: 'Sel fin de mer', brand: 'U', rating: 4.5, cat1: 'Epicerie salée', addable: true, available: true },
+    { itemid: '2', name: 'Sel fin iodé', brand: 'LA BALEINE', rating: 4.2, cat1: 'Epicerie salée', addable: true, available: true },
+  ];
+  const sans = rank(c, { wanted: 'sel fin', prefs: { products: {} } });
+  assert.equal(sans[0].itemid, '1', 'référence du test faussée');
+  const avec = rank(c, { wanted: 'sel fin', prefs: { products: {} }, mesProduits: new Map([['2', 7]]) });
+  assert.equal(avec[0].itemid, '2', 'la liste du compte ne pèse pas');
+  assert.equal(avec[0].dansMesProduits, true, 'drapeau absent');
 });
 
 await essai('arbitre : appel réellement construit', async () => {

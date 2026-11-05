@@ -5,9 +5,9 @@
 // Ici on parcourt le compte tout seul.
 //
 // Deux sources, complémentaires :
-//   - /mon-compte/mes-listes?isPref=true : les "achats récents", c'est-à-dire la
-//     liste de fréquence que le site calcule lui-même sur l'ensemble des commandes.
-//     C'est le meilleur corpus disponible, et il est prêt à l'emploi.
+//   - « Mes produits » / « Mes achats récents » (/mon-compte/mes-listes?isPref=true) :
+//     la liste de fréquence que le site calcule lui-même sur l'ensemble des
+//     commandes. C'est le meilleur corpus disponible, et il est prêt à l'emploi.
 //   - /mon-compte/mes-commandes + detail?orderId=... : l'historique commande par
 //     commande, qui donne la chronologie et les quantités réelles.
 
@@ -17,55 +17,16 @@ import 'dotenv/config';
 import { DATA_DIR, SITE } from './lib/paths.js';
 import { openBrowser, closeBrowser, ensureLoggedIn, acceptCookies } from './lib/session.js';
 import { sendTelegram } from './lib/telegram.js';
+import { lireMesProduits } from './lib/mes_produits.js';
 
-const FAVORITES_PATH = path.join(DATA_DIR, 'achats_recents.json');
 const ORDERS_DIR = path.join(DATA_DIR, 'orders');
 
-/** Lit les produits structurés publiés par le site sur la page courante. */
-async function readTcProducts(page) {
-  await page.waitForFunction(
-    () => window.tc_vars && Array.isArray(window.tc_vars.products),
-    { timeout: 12000 },
-  ).catch(() => {});
-  return page.evaluate(() => {
-    const v = window.tc_vars || {};
-    return (v.products || []).map((p) => ({
-      itemid: String(p.id),
-      ean: p.EAN || null,
-      name: p.name || '',
-      brand: p.brand || '',
-      price: p.price && p.price !== 'unknown' ? Number(p.price) : null,
-      rating: typeof p.notation === 'number' ? Number(p.notation.toFixed(2)) : null,
-      quantity: Number(p.quantity) || 1,
-      cat1: p.product_cat1 || null,
-      cat2: p.product_cat2 || null,
-      cat3: p.product_cat3 || null,
-      cgid: p.product_cat3_id || p.product_cat2_id || p.product_cat1_id || null,
-    }));
-  });
-}
-
+// La liste se charge par morceaux au fil du défilement : la lecture complète
+// (défilement jusqu'au bout, repli par les liens du menu) est partagée avec
+// prepare_cart, dans lib/mes_produits.js.
 async function syncFavorites(page) {
-  await page.goto(`${SITE}/mon-compte/mes-listes?isPref=true`, { waitUntil: 'domcontentloaded' });
-  await acceptCookies(page);
-  await page.waitForTimeout(1500);
-
-  const products = await readTcProducts(page);
-  const savedLists = await page.evaluate(() =>
-    [...document.querySelectorAll('h2,h3')]
-      .map((h) => h.innerText.trim())
-      .filter((t) => t && !/^(Mes listes|Fruits et)/.test(t))
-      .slice(0, 20));
-
-  fs.writeFileSync(FAVORITES_PATH, JSON.stringify({
-    capturedAt: new Date().toISOString(),
-    source: 'mes-produits-preferes',
-    count: products.length,
-    savedLists,
-    products,
-  }, null, 2));
-
-  console.log(`[FAVORIS] ${products.length} produits d'achats récents -> ${FAVORITES_PATH}`);
+  const { products, depuisCache, erreur } = await lireMesProduits(page, { log: (m) => console.log(m) });
+  if (depuisCache) throw new Error(`liste « Mes produits » illisible : ${erreur}`);
   return products;
 }
 
